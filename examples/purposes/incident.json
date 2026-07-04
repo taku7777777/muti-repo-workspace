@@ -1,0 +1,6 @@
+{
+  "$schema_note": "Example: incident-response purpose. Copy to config/purposes/incident.json and adapt. Typical additions for real setups: observability MCP servers (e.g. your APM, log search, error tracker) in mcp_servers — they must be defined in templates/default/mcp.json first.",
+  "description": "Incident response: investigate, mitigate, write up.",
+  "default_repos": [],
+  "mcp_servers": []
+}

@@ -1,0 +1,6 @@
+{
+  "$schema_note": "Example: project/planning purpose — mostly writing, few or no code repos. Copy to config/purposes/project.json and adapt.",
+  "description": "Project planning, design docs, cross-repo proposals.",
+  "default_repos": [],
+  "mcp_servers": []
+}

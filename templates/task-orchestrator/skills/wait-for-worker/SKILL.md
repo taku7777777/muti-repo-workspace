@@ -20,7 +20,7 @@ table), **always** with `run_in_background: true`:
 - Default timeout: 1800 seconds.
 - Output ends with:
   ```
-  RESULT status=<idle|dead|timeout> surface=<uuid> elapsed=<seconds>
+  RESULT status=<idle|dead|timeout|error> surface=<uuid> elapsed=<seconds>
   --- pane tail ---
   <last 40 lines of the worker pane>
   ```
@@ -29,4 +29,7 @@ table), **always** with `run_in_background: true`:
 - `status=dead` — the worker surface is gone; tell the human.
 - `status=timeout` — still running after the timeout; read the pane output
   and decide (extend the wait, or intervene).
+- `status=error` — the wait helper itself could not run (e.g. `~/.cmux-state.sh`
+  missing or not executable; `reason=` names the cause). This is an environment
+  problem, not a worker state: tell the human to re-run `/setup-workspace`.
 - `--workspace` / `--surface` are rejected by design.

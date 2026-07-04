@@ -29,6 +29,17 @@ assert_match() { # <label> <pattern> <actual>
   fi
 }
 
+assert_status() { # <label> <expected-exit> <cmd...>
+  local label="$1" want="$2"; shift 2
+  "$@" >/dev/null 2>&1; local got=$?
+  if [ "$got" -eq "$want" ]; then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    printf 'FAIL: %s\n  expected exit: %s\n  actual exit:   %s\n' "$label" "$want" "$got" >&2
+  fi
+}
+
 # --- to_home_path ------------------------------------------------------------
 assert_eq "to_home_path: under HOME" "~/x/y" "$(to_home_path "$HOME/x/y")"
 assert_eq "to_home_path: outside HOME" "/tmp/z" "$(to_home_path "/tmp/z")"
@@ -56,7 +67,7 @@ assert_eq "template_for: default fallback" \
 assert_eq "template_for: purpose override" \
   "$ROOT/templates/purposes/dev/initial-prompt.md" "$(template_for initial-prompt.md dev '')"
 assert_eq "template_for: unknown kind falls back to purpose" \
-  "$ROOT/templates/purposes/dev/initial-prompt.md" "$(template_for initial-prompt.md dev bug)"
+  "$ROOT/templates/purposes/dev/initial-prompt.md" "$(template_for initial-prompt.md dev zzz-no-such-kind)"
 
 # --- list_purposes ---------------------------------------------------------------
 purposes="$(list_purposes | tr '\n' ' ')"
@@ -81,18 +92,40 @@ assert_eq "ticket: missing prefix" "ng" "$(check_ticket '1234')"
 assert_eq "ticket: lowercase prefix" "ng" "$(check_ticket 'abc-1')"
 assert_eq "ticket: path traversal" "ng" "$(check_ticket 'A-1/../x')"
 
-# --- pre-push org extraction -------------------------------------------------------
-extract_org() {
-  local REMOTE_URL="$1" org=""
-  case "$REMOTE_URL" in
-    *"://"*) org="$(printf '%s' "$REMOTE_URL" | sed -E 's#^[a-z+]+://[^/]+/([^/]+)/.*#\1#')" ;;
-    *@*:*/*) org="${REMOTE_URL#*:}" ; org="${org%%/*}" ;;
-  esac
-  printf '%s' "$org"
-}
-assert_eq "pre-push org: ssh scp-like" "my-org" "$(extract_org 'git@github.com:my-org/repo.git')"
-assert_eq "pre-push org: https" "my-org" "$(extract_org 'https://github.com/my-org/repo.git')"
-assert_eq "pre-push org: ssh url" "my-org" "$(extract_org 'ssh://git@github.com/my-org/repo.git')"
+# --- validate_ticket_id (security boundary) --------------------------------------
+# Runs in a subshell because validate_ticket_id calls die() (exit 1).
+vti() ( validate_ticket_id "$1" )
+assert_status "validate_ticket_id: valid" 0 vti 'ABC-123'
+assert_status "validate_ticket_id: valid with suffix" 0 vti 'HHW-12_a-b'
+assert_status "validate_ticket_id: rejects slash traversal" 1 vti 'A-1/../x'
+assert_status "validate_ticket_id: rejects dotdot" 1 vti 'A-..'
+assert_status "validate_ticket_id: rejects empty" 1 vti ''
+assert_status "validate_ticket_id: rejects lowercase prefix" 1 vti 'abc-1'
+# Newline bypass: the OLD line-based grep accepted this (line 1 matched);
+# validate_ticket_id must reject it.
+assert_status "validate_ticket_id: rejects embedded newline" 1 vti "$(printf 'A-1\n/../../tmp/evil')"
+
+# --- pre-push hook (real subprocess, controlled config) --------------------------
+# Invoke the ACTUAL hook against a temp workspace so a regression in the hook
+# itself is caught (the previous test exercised an inline copy that could not).
+hookdir="$(mktemp -d)"
+mkdir -p "$hookdir/.githooks" "$hookdir/config"
+cp "$ROOT/.githooks/pre-push" "$hookdir/.githooks/pre-push"
+run_hook() { bash "$hookdir/.githooks/pre-push" origin "$1"; }
+
+# allowed_push_orgs set: org enforced, host enforced.
+printf '{"allowed_push_orgs":["good-org"],"allowed_push_hosts":["github.com"]}\n' > "$hookdir/config/workspace.json"
+assert_status "pre-push: allowed org+host passes" 0 run_hook 'https://github.com/good-org/repo.git'
+assert_status "pre-push: allowed org via scp-like ssh passes" 0 run_hook 'git@github.com:good-org/repo.git'
+assert_status "pre-push: disallowed org blocked" 1 run_hook 'https://github.com/evil-org/repo.git'
+assert_status "pre-push: disallowed host blocked (org matches)" 1 run_hook 'https://evil.example/good-org/repo.git'
+assert_status "pre-push: unparsable URL blocked" 1 run_hook 'not-a-url'
+
+# allowed_push_orgs EMPTY: org unrestricted (warn) BUT host still enforced.
+printf '{"allowed_push_orgs":[],"allowed_push_hosts":["github.com"]}\n' > "$hookdir/config/workspace.json"
+assert_status "pre-push: empty orgs still allows allowed host" 0 run_hook 'https://github.com/anyone/repo.git'
+assert_status "pre-push: empty orgs still BLOCKS bad host" 1 run_hook 'https://evil.example/anyone/repo.git'
+rm -rf "$hookdir"
 
 echo ""
 echo "passed: $PASS  failed: $FAIL"

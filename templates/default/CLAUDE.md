@@ -11,7 +11,7 @@ Per-ticket workspace created by /open-task. Purpose: **{{PURPOSE}}**.
 | `repositories/<repo>/` | Git worktrees on branch `{{BRANCH}}` |
 | `agents/worker/` | Worker Claude CWD (sandboxed executor) |
 | `agents/orchestrator/` | Orchestrator Claude CWD (task commander) |
-| `scripts/` | Task-local privileged scripts (push-create-pr.sh, add-repository.sh) |
+| `scripts/` | Task-local privileged script (push-create-pr.sh — the only publish path) |
 
 ## Repositories in this task
 

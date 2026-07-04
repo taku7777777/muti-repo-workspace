@@ -5,28 +5,30 @@
     "OTEL_RESOURCE_ATTRIBUTES": "workspace={{TICKET_ID}},purpose={{PURPOSE}}"
   },
 
+  "_security_note": "WARNING: without the OS sandbox, allowlisted shell tools can read files the Read-tool deny rules below block (e.g. `cat ~/.ssh/id_rsa`), and `find -exec` / `git difftool -x` would run arbitrary commands — so the allow list below deliberately excludes those escape hatches. No-sandbox mode gives tool-level guards only; it CANNOT fully protect secrets from shell reads. Use it only where the host is already trusted.",
+
   "permissions": {
     "defaultMode": "acceptEdits",
     "allow": [
       "Bash(git status*)",
       "Bash(git log *)",
-      "Bash(git diff*)",
+      "Bash(git diff)",
+      "Bash(git diff *)",
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(ls *)",
       "Bash(cat *)",
       "Bash(grep *)",
       "Bash(rg *)",
-      "Bash(find *)",
       "Bash(mkdir *)"
     ],
     "ask": [
+      "Bash(find *)",
       "Bash(git push *)",
       "Bash(rm *)",
       "Bash(curl *)",
       "Bash(wget *)"
     ],
-    "ask_note": "WARNING: without the OS sandbox, Bash(cat/grep/find *) can read files the Read-tool deny rules below block (e.g. `cat ~/.ssh/id_rsa`). No-sandbox mode gives tool-level guards only; it CANNOT protect secrets from shell reads. Use it only where the host is already trusted.",
     "deny": [
       "Read(~/.ssh/**)",
       "Read(~/.aws/**)",

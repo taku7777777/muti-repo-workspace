@@ -41,8 +41,10 @@ if [ -f "$WORKER_SETTINGS" ]; then
   GIT_DIR_PATH="$WORKSPACE_ROOT/repositories/$REPO/.git"
   if ! jq -e --arg p "$GIT_DIR_PATH" '.sandbox.filesystem.allowWrite | index($p)' "$WORKER_SETTINGS" >/dev/null; then
     tmp="$(mktemp)"
-    # Grant commit access but keep .git/config and .git/hooks read-only (denyWrite
-    # wins) so the worker can't disable the pre-push guard or redirect the remote.
+    # Grant commit access, keeping .git/config and .git/hooks read-only as a
+    # first layer. The authoritative redirect/hook-disable guard is at push time
+    # (push-create-pr.sh forces -c core.hooksPath); this denyWrite does not cover
+    # per-worktree config.worktree and is not the boundary on its own.
     jq --arg p "$GIT_DIR_PATH" \
       '.sandbox.filesystem.allowWrite += [$p]
        | .sandbox.filesystem.denyWrite += [($p + "/config"), ($p + "/hooks")]' \

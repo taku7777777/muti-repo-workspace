@@ -27,6 +27,18 @@ case "$REF" in
     ;;
 esac
 
+# Validate before handing to gh: an unvalidated num like '--web' or a
+# malformed repo would be parsed by gh as flags / open a browser instead of
+# failing cleanly.
+case "$num" in
+  ""|*[!0-9]*) echo "could not parse an issue number from ref: $REF" >&2; exit 2 ;;
+esac
+case "$repo" in
+  [!A-Za-z0-9]*|*[!A-Za-z0-9._/-]*|*/*/*|*/) echo "could not parse a valid <org>/<repo> from ref: $REF" >&2; exit 2 ;;
+  */*) : ;;
+  *) echo "could not parse a valid <org>/<repo> from ref: $REF" >&2; exit 2 ;;
+esac
+
 gh issue view "$num" -R "$repo" --json title,url,body,labels --template \
 '# {{.title}}
 

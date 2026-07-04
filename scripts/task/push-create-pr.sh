@@ -18,6 +18,15 @@ WORKSPACE_ROOT="$(cd "$TASK_DIR/../.." && pwd)"
 REPO="${1:?usage: push-create-pr.sh <repo> --title ... (--body ... | --body-file ...)}"
 shift
 
+# This script runs OUTSIDE the sandbox (orchestrator excludedCommands) with
+# unrestricted network. REPO is interpolated into the worktree path below, so a
+# value like '../../../other-repo' would point git at a repo outside the
+# workspace where the pre-push hook does not apply. Constrain it to a bare name.
+case "$REPO" in
+  ""|-*)      echo "ERROR: repo must be a bare name (not a flag)" >&2; exit 2 ;;
+  */*|*..*)   echo "ERROR: repo '$REPO' must be a bare directory name" >&2; exit 2 ;;
+esac
+
 TITLE=""
 BODY=""
 BODY_FILE=""
@@ -39,6 +48,19 @@ if [ -z "$BODY" ] && [ -z "$BODY_FILE" ]; then
   echo "ERROR: --body or --body-file is required" >&2; exit 2
 fi
 
+# --body-file is read by gh outside the sandbox, so an arbitrary path (e.g.
+# ~/.aws/credentials) would leak into a public PR body. Confine it to the task.
+if [ -n "$BODY_FILE" ]; then
+  bf_dir="$(cd "$(dirname "$BODY_FILE")" 2>/dev/null && pwd)" \
+    || { echo "ERROR: --body-file directory does not exist" >&2; exit 2; }
+  bf_abs="$bf_dir/$(basename "$BODY_FILE")"
+  case "$bf_abs" in
+    "$TASK_DIR"/*) : ;;
+    *) echo "ERROR: --body-file must be inside this task directory ($TASK_DIR)" >&2; exit 2 ;;
+  esac
+  BODY_FILE="$bf_abs"
+fi
+
 WT="$TASK_DIR/repositories/$REPO"
 [ -d "$WT/.git" ] || [ -f "$WT/.git" ] || { echo "ERROR: no worktree for '$REPO' in this task" >&2; exit 1; }
 
@@ -47,14 +69,20 @@ if [ "$BRANCH" = "HEAD" ]; then
   echo "ERROR: worktree is in detached HEAD state" >&2; exit 1
 fi
 
-if ! git -C "$WT" diff --quiet || ! git -C "$WT" diff --cached --quiet; then
-  echo "ERROR: worktree has uncommitted changes — ask the worker to commit first." >&2
+# --porcelain (not diff --quiet) so untracked, never-added files also block —
+# otherwise a new file the worker forgot to `git add` ships a PR silently
+# missing it.
+if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+  echo "ERROR: worktree has uncommitted or untracked changes — ask the worker to commit first." >&2
   exit 1
 fi
 
 echo "==> Pushing $REPO ($BRANCH)"
-# The workspace pre-push hook (allowed_push_orgs) applies here.
-git -C "$WT" push -u origin "$BRANCH"
+# Force the workspace pre-push hook on the command line so a per-worktree
+# override (config.worktree core.hooksPath) cannot disable the org/host guard,
+# and never pass --no-verify. This is the single audited publish path; the hook
+# must run here regardless of what the worker may have written into .git.
+git -C "$WT" -c core.hooksPath="$WORKSPACE_ROOT/.githooks" push -u origin "$BRANCH"
 
 echo "==> Creating PR"
 PR_ARGS=(--title "$TITLE" --head "$BRANCH")

@@ -4,6 +4,8 @@ A Git-repository-shaped workspace for running **sandboxed, multi-agent Claude
 Code sessions across multiple repositories** — one isolated workspace per
 ticket, with an orchestrator agent commanding a sandboxed worker agent.
 
+> 🇯🇵 日本語版: [README.ja.md](README.ja.md)
+
 Clone it, list your repositories in `config/repos.json`, and every ticket gets:
 
 - its own directory `tasks/<TICKET_ID>/` with **git worktrees** (branch

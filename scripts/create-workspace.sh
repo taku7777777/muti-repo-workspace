@@ -66,9 +66,7 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$TICKET_ID" ] || die "--ticket is required"
-TICKET_PATTERN="$(json_get "$WS_CONFIG" '.ticket_id_pattern' '^[A-Z]+-[A-Za-z0-9_-]+$')"
-printf '%s' "$TICKET_ID" | grep -qE "$TICKET_PATTERN" \
-  || die "ticket id '$TICKET_ID' does not match $TICKET_PATTERN (the prefix is required and never auto-added)"
+validate_ticket_id "$TICKET_ID"
 
 TASK_DIR="$WORKSPACE_ROOT/tasks/$TICKET_ID"
 META="$TASK_DIR/.workspace-meta.json"
@@ -165,10 +163,15 @@ generate_agent_settings() {
   fi
 
   # Worker: worktree commits write into each origin repo's .git directory —
-  # inject write access for every repo in this task. But keep .git/config and
-  # .git/hooks OUT of reach (denyWrite wins over allowWrite): otherwise the
-  # worker could rewrite core.hooksPath (disabling the pre-push org guard) or
-  # remote.origin.url (redirecting the orchestrator's push for exfiltration).
+  # inject write access for every repo in this task. Keep .git/config and
+  # .git/hooks OUT of reach (denyWrite wins over allowWrite) as a first layer.
+  # NOTE: this is NOT sufficient on its own — per-worktree config
+  # (.git/worktrees/<name>/config.worktree) lives elsewhere and stays writable,
+  # so a worker could still set core.hooksPath / remote.origin.url there. The
+  # authoritative guard is at the single publish path: push-create-pr.sh forces
+  # -c core.hooksPath so the pre-push host/org hook always runs, and the hook
+  # enforces the host allowlist unconditionally. Do not rely on this denyWrite
+  # as the boundary; it only raises the bar.
   if [ "$role" = "worker" ] && [ "$SANDBOX" = "true" ]; then
     local r t2 gitdir
     for r in $REPOS; do
@@ -268,13 +271,20 @@ phase_finalize() {
 
 # ---------------------------------------------------------------------------
 phase_cmux() {
-  load_meta
+  # No load_meta here: .workspace-meta.json is deleted at the end of a
+  # successful cmux phase, so requiring it would make /start-task (re-run
+  # --phase cmux on an existing task) fail every time. cmux only needs the
+  # task dir + ticket id (already set) and the generated agent dirs on disk.
   local worker_dir="$TASK_DIR/agents/worker"
   local orch_dir="$TASK_DIR/agents/orchestrator"
   [ -f "$worker_dir/initial-prompt.md" ] || die "agents not generated — run --phase finalize first"
 
+  # Paths are shell-quoted (%q) because these strings are sent verbatim to a
+  # cmux shell — an unquoted path with spaces would cd to the wrong directory
+  # and start Claude without the task's settings.
   local worker_cmd="claude --permission-mode acceptEdits \"\$(cat initial-prompt.md)\""
-  local orch_cmd="cd $orch_dir && claude \"\$(cat initial-prompt.md)\""
+  local orch_cmd
+  orch_cmd="cd $(printf '%q' "$orch_dir") && claude \"\$(cat initial-prompt.md)\""
 
   if cmux_available; then
     # Guard against duplicating an already-open workspace (re-run, or
@@ -306,7 +316,7 @@ EOF
     term_surface="$(cmux_new_tab "$ws" "Terminal")"
     # cmux new-surface has no --cwd: always cd explicitly (a bare 'claude'
     # would start in \$HOME and miss the task settings).
-    cmux_send_line "$ws" "$term_surface" "cd $TASK_DIR"
+    cmux_send_line "$ws" "$term_surface" "cd $(printf '%q' "$TASK_DIR")"
 
     orch_surface="$(cmux_new_tab "$ws" "Orchestrator Claude")"
     cmux_send_line "$ws" "$orch_surface" "$orch_cmd"

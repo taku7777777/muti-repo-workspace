@@ -85,3 +85,6 @@ summary: |
 
 `RESULT status=dead` → worker session is gone: tell the human / `/start-task`.
 `RESULT status=timeout` → read the pane (`read-output.sh`), judge, re-arm.
+`RESULT status=error` → the wait helper could not run (`reason=` names it, e.g.
+a missing `~/.cmux-state.sh`): an environment fault, not a worker state — tell
+the human to re-run `/setup-workspace`.

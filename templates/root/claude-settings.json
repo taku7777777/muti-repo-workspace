@@ -55,7 +55,8 @@
       "Bash(gh *)",
       "Bash(git status*)",
       "Bash(git log *)",
-      "Bash(git diff*)",
+      "Bash(git diff)",
+      "Bash(git diff *)",
       "Bash(git branch*)",
       "Bash(git worktree list*)"
     ],

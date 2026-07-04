@@ -23,6 +23,10 @@ TICKET_ID="${1:?usage: update-task-sandbox.sh <TICKET_ID> <action> [value]}"
 ACTION="${2:?missing action (--show / --add-domain / --add-allow / --add-ask / --add-write / --add-git-access)}"
 VALUE="${3:-}"
 
+# Ticket id is interpolated into the settings path below — validate so this
+# "audited escalation" path cannot be pointed at a file outside tasks/.
+validate_ticket_id "$TICKET_ID"
+
 WORKSPACE_ROOT="$(workspace_root)"
 SETTINGS="$WORKSPACE_ROOT/tasks/$TICKET_ID/agents/worker/.claude/settings.json"
 [ -f "$SETTINGS" ] || die "no worker settings for task $TICKET_ID"
@@ -72,13 +76,16 @@ case "$ACTION" in
     fi
     apply '.sandbox.network.allowedDomains = ((.sandbox.network.allowedDomains // []) + ["github.com"] | unique)
          | .sandbox.network.allowUnixSockets = ((.sandbox.network.allowUnixSockets // []) + [$sock] | unique)
-         | .permissions.allow = ((.permissions.allow // []) + ["Read(~/.gitconfig)"] | unique)' \
+         | .permissions.allow = ((.permissions.allow // []) + ["Read(~/.gitconfig)"] | unique)
+         | .permissions.ask = ((.permissions.ask // []) + ["Bash(git push*)"] | unique)' \
       --arg sock "$SSH_AUTH_SOCK"
     info "added git fetch access (github.com + SSH agent socket)"
-    warn "this also makes 'git push' to github.com reachable from the worker,"
-    warn "weakening the orchestrator-only publish boundary. The pre-push org/host"
-    warn "hook still applies. Prefer leaving push to the orchestrator; grant this"
-    warn "only when the worker genuinely needs to fetch."
+    warn "this also makes the worker network-capable of reaching github.com, so"
+    warn "'git push' is no longer physically blocked — it is only gated by an ask"
+    warn "rule (bypassable in principle, e.g. 'git push --no-verify' skips the"
+    warn "pre-push org/host hook). This weakens the orchestrator-only publish"
+    warn "boundary from OS-enforced to advisory. Prefer leaving push to the"
+    warn "orchestrator; grant this only when the worker genuinely needs to fetch."
     ;;
   *)
     die "unknown action: $ACTION"

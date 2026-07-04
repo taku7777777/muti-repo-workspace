@@ -18,9 +18,12 @@ agent push.
    `tasks/<T>/docs/pr-body-<repo>.md`) from `docs/task.md`, the handoff log
    and the diff.
 
-3. Emit the command:
+3. Emit the command. The Terminal tab (Tab 2) is already `cd`'d to the task
+   root (`tasks/<T>/`), so use paths relative to THAT directory — not the
+   workspace root:
    ```
-   bash tasks/<T>/scripts/push-create-pr.sh <repo> --title "..." --body-file tasks/<T>/docs/pr-body-<repo>.md
+   bash scripts/push-create-pr.sh <repo> --title "..." --body-file docs/pr-body-<repo>.md
    ```
    Copy it to the clipboard with `pbcopy` when available, and print it either
-   way. Tell the user to paste it into the Terminal tab (Tab 2).
+   way. Tell the user to paste it into the Terminal tab (Tab 2). (If they will
+   run it from the workspace root instead, prefix both paths with `tasks/<T>/`.)

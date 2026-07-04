@@ -22,6 +22,10 @@ TICKET_ID="${1:?usage: remove-workspace.sh <TICKET_ID> [--force]}"
 FORCE=false
 [ "${2:-}" = "--force" ] && FORCE=true
 
+# Ticket id flows straight into the rm -rf target below — validate before use
+# so a value like '..' or 'ABC-1/../../repositories' cannot escape tasks/.
+validate_ticket_id "$TICKET_ID"
+
 WORKSPACE_ROOT="$(workspace_root)"
 TASK_DIR="$WORKSPACE_ROOT/tasks/$TICKET_ID"
 [ -d "$TASK_DIR" ] || die "no such task: $TICKET_ID"
@@ -56,9 +60,9 @@ push first (create-pr) or re-run with --force to discard."
 fi
 
 # --- teardown ----------------------------------------------------------------
-info "Removing worktrees for $TICKET_ID"
-remove_worktrees "$TICKET_ID"
-
+# Close the cmux workspace FIRST so the live worker session cannot write into
+# (or resurrect) the worktrees while they are being removed, and so the
+# unpushed-work check above is not raced by a commit made mid-teardown.
 if cmux_available; then
   # Exact-title match (shared helper) so closing ABC-1 never tears down ABC-12.
   ws_uuid="$(cmux_workspace_uuid_by_name "$TICKET_ID")"
@@ -68,6 +72,9 @@ if cmux_available; then
       || warn "could not close cmux workspace (close it manually)"
   fi
 fi
+
+info "Removing worktrees for $TICKET_ID"
+remove_worktrees "$TICKET_ID"
 
 info "Deleting $TASK_DIR"
 rm -rf "$TASK_DIR"

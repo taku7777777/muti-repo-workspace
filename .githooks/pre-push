@@ -25,11 +25,6 @@ fi
 
 ALLOWED_ORGS="$(jq -r '(.allowed_push_orgs // []) | join(" ")' "$CONFIG")"
 
-if [ -z "$ALLOWED_ORGS" ]; then
-  echo "pre-push: WARNING: allowed_push_orgs is empty in config/workspace.json; push destinations are not restricted." >&2
-  exit 0
-fi
-
 # Extract host AND org/user from the remote URL.
 #   git@github.com:ORG/repo.git | ssh://git@github.com/ORG/repo.git | https://github.com/ORG/repo.git
 host=""
@@ -48,9 +43,11 @@ if [ -z "$org" ] || [ "$org" = "$REMOTE_URL" ] || [ -z "$host" ]; then
   exit 1
 fi
 
-# Host allowlist: without this, a remote like https://evil.com/ALLOWED_ORG/repo
-# would pass the org check and exfiltrate. Defaults to github.com; override via
-# config/workspace.json allowed_push_hosts.
+# Host allowlist is enforced FIRST and ALWAYS — even when allowed_push_orgs is
+# empty. Without it a redirected remote (e.g. a worker-written
+# config.worktree remote.origin.url=https://evil.example/ALLOWED_ORG/repo, or
+# simply an empty org policy) would exfiltrate. Defaults to github.com;
+# override via config/workspace.json allowed_push_hosts.
 ALLOWED_HOSTS="$(jq -r '(.allowed_push_hosts // ["github.com"]) | join(" ")' "$CONFIG")"
 host_ok=false
 for h in $ALLOWED_HOSTS; do
@@ -59,6 +56,13 @@ done
 if ! $host_ok; then
   echo "pre-push: BLOCKED: push to host '$host' is not allowed (allowed: $ALLOWED_HOSTS)." >&2
   exit 1
+fi
+
+# Org allowlist: only skipped (with a warning) when unset, and only after the
+# host check above has already run.
+if [ -z "$ALLOWED_ORGS" ]; then
+  echo "pre-push: WARNING: allowed_push_orgs is empty in config/workspace.json; push org is not restricted (host '$host' allowed)." >&2
+  exit 0
 fi
 
 for allowed in $ALLOWED_ORGS; do

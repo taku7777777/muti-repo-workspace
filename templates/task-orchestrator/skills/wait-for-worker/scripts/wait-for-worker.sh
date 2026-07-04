@@ -9,7 +9,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --workspace*|--surface*)
       echo "ERROR: target override is not allowed" >&2; exit 2 ;;
-    *[!0-9]*) echo "usage: wait-for-worker.sh [timeout-seconds]" >&2; exit 2 ;;
+    ""|*[!0-9]*) echo "usage: wait-for-worker.sh [timeout-seconds]" >&2; exit 2 ;;
     *) TIMEOUT="$1"; shift ;;
   esac
 done

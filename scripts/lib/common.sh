@@ -30,8 +30,30 @@ to_home_path() {
 }
 
 # sed_escape <text> — escape for use in a sed replacement with '|' delimiter.
+# Placeholders are single-line by contract, so a stray newline in a value
+# (e.g. a pasted multi-line --title) is flattened to a space rather than
+# aborting render_template with a sed syntax error mid-scaffold.
 sed_escape() {
-  printf '%s' "$1" | sed -e 's/[&\\|]/\\&/g'
+  printf '%s' "$1" | tr '\n' ' ' | sed -e 's/[&\\|]/\\&/g'
+}
+
+# validate_ticket_id <id> — die unless <id> matches ticket_id_pattern and is
+# free of path-traversal characters. Ticket ids are interpolated into
+# filesystem paths (TASK_DIR, worktree targets, settings paths), so this is a
+# security boundary: every entry script that takes a ticket id MUST call it.
+validate_ticket_id() {
+  local id="$1" pattern nl
+  nl='
+'
+  case "$id" in
+    "")      die "ticket id is empty" ;;
+    */*)     die "invalid ticket id '$id': must not contain '/'" ;;
+    *..*)    die "invalid ticket id '$id': must not contain '..'" ;;
+    *"$nl"*) die "invalid ticket id '$id': must not contain newlines" ;;
+  esac
+  pattern="$(json_get "$(workspace_root)/config/workspace.json" '.ticket_id_pattern' '^[A-Z]+-[A-Za-z0-9_-]+$')"
+  printf '%s' "$id" | grep -qE "$pattern" \
+    || die "ticket id '$id' does not match $pattern (the prefix is required and never auto-added)"
 }
 
 # render_template <template-file>

@@ -18,9 +18,12 @@ For a task that already exists on disk but has no live cmux workspace.
    ```bash
    bash scripts/create-workspace.sh --ticket <T> --phase cmux --yes
    ```
-   Note: `--phase cmux` requires the agent directories to exist (it fails
-   cleanly if the task was never finalized — in that case resume /open-task
-   from the finalize step instead).
+   Note: `--phase cmux` only needs the generated agent directories on disk
+   (from the finalize step); it does NOT need `.workspace-meta.json`, which is
+   deleted once a task is fully created — so this works for an already-created
+   task. If the agents were never generated it fails cleanly with
+   "agents not generated — run --phase finalize first"; in that case resume
+   /open-task from the finalize step instead.
 
 3. The worker restarts on its initial prompt; if the task was mid-flight,
    send it a catch-up instruction from the orchestrator (it can re-derive

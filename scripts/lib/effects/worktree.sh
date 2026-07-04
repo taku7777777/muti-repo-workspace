@@ -69,8 +69,14 @@ remove_worktrees() {
       info "  - removing worktree $repo"
       git -C "$origin" worktree remove --force "$wt" 2>/dev/null \
         || warn "    could not remove worktree $wt (removing directory manually)"
+      # rm BEFORE prune: if `worktree remove` failed, the directory still
+      # exists and prune would keep the registration; deleting it first lets
+      # prune clear the stale admin metadata so a later re-add of the same
+      # ticket+repo doesn't hit "missing but already registered worktree".
+      rm -rf "$wt"
       git -C "$origin" worktree prune
+    else
+      rm -rf "$wt"
     fi
-    rm -rf "$wt"
   done
 }

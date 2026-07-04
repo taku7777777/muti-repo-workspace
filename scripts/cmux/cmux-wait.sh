@@ -34,7 +34,9 @@ GRACE="${CMUX_WAIT_GRACE:-20}"
 start="$(date +%s)"
 seen_running=false
 idle_streak=0
+dead_streak=0
 status="timeout"
+DEAD_CONFIRMS="${CMUX_WAIT_DEAD_CONFIRMS:-2}"
 
 while :; do
   now="$(date +%s)"
@@ -47,14 +49,21 @@ while :; do
   state="$("$STATE_SCRIPT" "$WS" "$SURF")"
   case "$state" in
     dead)
-      status="dead"
-      break
+      # Require consecutive dead reads: one transient read-screen failure
+      # (daemon hiccup, focus change) must not be reported as a dead worker.
+      dead_streak=$((dead_streak + 1))
+      if [ "$dead_streak" -ge "$DEAD_CONFIRMS" ]; then
+        status="dead"
+        break
+      fi
       ;;
     running)
       seen_running=true
       idle_streak=0
+      dead_streak=0
       ;;
     idle)
+      dead_streak=0
       if $seen_running || [ "$elapsed" -ge "$GRACE" ]; then
         idle_streak=$((idle_streak + 1))
         if [ "$idle_streak" -ge "$IDLE_CONFIRMS" ]; then

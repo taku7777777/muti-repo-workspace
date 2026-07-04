@@ -5,6 +5,9 @@
   "allowed_push_orgs": [],
   "allowed_push_orgs_note": "GitHub orgs/users that git push is allowed to target, enforced by .githooks/pre-push in every cloned repo and worktree. Empty list = no restriction (a warning is printed on push).",
 
+  "allowed_push_hosts": ["github.com"],
+  "allowed_push_hosts_note": "Hosts a push may target. The pre-push hook checks BOTH host and org, so a remote like https://evil.example/ALLOWED_ORG/repo cannot pass by matching only the org segment.",
+
   "default_purpose": "dev",
 
   "ticket_source": "manual",

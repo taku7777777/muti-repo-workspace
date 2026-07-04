@@ -13,10 +13,21 @@ cmux_available() {
   command -v cmux >/dev/null 2>&1 && [ "$(cmux ping 2>/dev/null)" = "PONG" ]
 }
 
-# cmux_workspace_uuid_by_name <name> — newest workspace whose title matches.
+# cmux_workspace_uuid_by_name <name> — newest workspace whose title EXACTLY
+# equals <name>. Exact match (not substring) so ticket ids that are prefixes
+# of each other (e.g. ABC-1 vs ABC-12) never collide. The title column may
+# carry a leading activity marker (e.g. "✳ ") and a trailing " [selected]";
+# both are stripped before comparing.
 cmux_workspace_uuid_by_name() {
-  cmux workspace list --id-format both 2>/dev/null \
-    | grep -F -- "$1" | tail -1 | sed 's/^[* ]*//' | awk '{print $2}'
+  cmux workspace list --id-format both 2>/dev/null | awk -v want="$1" '
+    { sub(/^[* ]+/, "")                       # drop selection marker
+      ref=$1; uuid=$2
+      title=$0; sub(/^[^ ]+ +[^ ]+ +/, "", title)   # everything after ref uuid
+      sub(/ +\[selected\][[:space:]]*$/, "", title)
+      sub(/^[^[:alnum:]]+ +/, "", title)      # drop leading non-alnum marker glyph
+      if (title == want) last=uuid
+    }
+    END { if (last != "") print last }'
 }
 
 # cmux_new_workspace <name> <cwd> <command> — echoes the workspace UUID.
@@ -39,8 +50,9 @@ cmux_first_surface_uuid() {
 cmux_new_tab() {
   local ws="$1" title="$2" out uuid
   out="$(cmux new-surface --type terminal --workspace "$ws" --focus false --id-format both)"
-  # "OK surface:N (UUID) pane:N (UUID) workspace:N (UUID)" — first parenthesized token.
-  uuid="$(printf '%s' "$out" | sed -n 's/^OK surface:[0-9]* (\([A-F0-9-]*\)).*/\1/p')"
+  # "OK surface:N (UUID) pane:N (UUID) workspace:N (UUID)" — first parenthesized
+  # token. Case-insensitive hex so lowercase UUIDs (from other cmux builds) parse.
+  uuid="$(printf '%s' "$out" | sed -n 's/^OK surface:[0-9]* (\([A-Fa-f0-9-]*\)).*/\1/p')"
   [ -n "$uuid" ] || return 1
   cmux rename-tab --workspace "$ws" --surface "$uuid" "$title" >/dev/null
   printf '%s' "$uuid"

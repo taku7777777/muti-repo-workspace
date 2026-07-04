@@ -15,9 +15,12 @@ REF="${2:-}"
 : "${NOTION_API_TOKEN:?NOTION_API_TOKEN is required for the notion adapter}"
 command -v jq >/dev/null 2>&1 || { echo "notion adapter requires jq" >&2; exit 3; }
 
-# Extract the 32-hex page id from a URL like .../Some-Title-<32hex>?... or use as-is.
-PAGE_ID="$(printf '%s' "$REF" | grep -oE '[0-9a-f]{32}' | tail -1 || true)"
+# Extract the page id from the ref. Notion ids appear either dashless
+# (32 hex) or as a dashed UUID (8-4-4-4-12); accept both, else use the ref
+# as-is. Normalize a dashed id to dashless for the API path.
+PAGE_ID="$(printf '%s' "$REF" | grep -oiE '[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}' | tail -1 || true)"
 [ -n "$PAGE_ID" ] || PAGE_ID="$REF"
+PAGE_ID="$(printf '%s' "$PAGE_ID" | tr -d '-')"
 
 api() {
   curl -sf "https://api.notion.com/v1/$1" \

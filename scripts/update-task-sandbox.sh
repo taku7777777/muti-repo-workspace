@@ -67,11 +67,18 @@ case "$ACTION" in
     # Lets the sandboxed worker run git fetch/pull against remotes: read
     # access to git/ssh config plus the SSH agent socket. Push stays gated
     # through the orchestrator's push-create-pr.sh.
+    if [ -z "${SSH_AUTH_SOCK:-}" ]; then
+      die "--add-git-access needs a running ssh-agent (SSH_AUTH_SOCK is unset); start one and retry"
+    fi
     apply '.sandbox.network.allowedDomains = ((.sandbox.network.allowedDomains // []) + ["github.com"] | unique)
          | .sandbox.network.allowUnixSockets = ((.sandbox.network.allowUnixSockets // []) + [$sock] | unique)
          | .permissions.allow = ((.permissions.allow // []) + ["Read(~/.gitconfig)"] | unique)' \
-      --arg sock "${SSH_AUTH_SOCK:-/dev/null}"
+      --arg sock "$SSH_AUTH_SOCK"
     info "added git fetch access (github.com + SSH agent socket)"
+    warn "this also makes 'git push' to github.com reachable from the worker,"
+    warn "weakening the orchestrator-only publish boundary. The pre-push org/host"
+    warn "hook still applies. Prefer leaving push to the orchestrator; grant this"
+    warn "only when the worker genuinely needs to fetch."
     ;;
   *)
     die "unknown action: $ACTION"

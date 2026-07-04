@@ -58,6 +58,7 @@ if ! $SKIP_CLONE; then
     url="$(jq -r ".repositories[$i].url" "$REPOS_JSON")"
     i=$((i + 1))
     [ -n "$name" ] && [ "$name" != "null" ] || die "repos.json entry $((i-1)): missing name"
+    [ -n "$url" ] && [ "$url" != "null" ] || die "repos.json entry '$name': missing url"
     dest="$WORKSPACE_ROOT/repositories/$name"
     if [ -d "$dest/.git" ]; then
       log "  - $name: already cloned, skipping"

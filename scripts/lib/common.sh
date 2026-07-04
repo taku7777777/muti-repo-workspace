@@ -41,7 +41,8 @@ sed_escape() {
 render_template() {
   local tpl="$1"
   [ -f "$tpl" ] || die "template not found: $tpl"
-  sed \
+  local out
+  out="$(sed \
     -e "s|{{WORKSPACE_ROOT}}|$(sed_escape "${WORKSPACE_ROOT:-}")|g" \
     -e "s|{{TASK_DIR}}|$(sed_escape "${TASK_DIR:-}")|g" \
     -e "s|{{TASK_DIR_H}}|$(sed_escape "${TASK_DIR_H:-}")|g" \
@@ -51,7 +52,13 @@ render_template() {
     -e "s|{{TICKET_URL}}|$(sed_escape "${TICKET_URL:-}")|g" \
     -e "s|{{BRANCH}}|$(sed_escape "${BRANCH:-}")|g" \
     -e "s|{{REPOS_LIST}}|$(sed_escape "${REPOS_LIST:-}")|g" \
-    "$tpl"
+    "$tpl")"
+  # Catch typo'd or newly-added-but-unwired placeholders before they ship
+  # verbatim into a generated settings/CLAUDE file.
+  local residual
+  residual="$(printf '%s' "$out" | grep -oE '\{\{[A-Z_]+\}\}' | sort -u | tr '\n' ' ' || true)"
+  [ -n "$residual" ] && warn "render_template: unresolved placeholder(s) in $(basename "$tpl"): $residual"
+  printf '%s\n' "$out"
 }
 
 # template_for <relative-file> <purpose> [dev_kind]

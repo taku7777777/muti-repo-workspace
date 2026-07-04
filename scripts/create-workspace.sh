@@ -9,8 +9,12 @@
 #                     Claude), docs, agent dirs, settings, per-task skills.
 #   --phase cmux      Create the cmux workspace (3 tabs), pin .worker-target,
 #                     start both Claude sessions. Run AFTER trust is set up so
-#                     the worker's first boot honors permissions.allow.
+#                     the worker's first boot honors permissions.allow. Skips
+#                     creation if a workspace of the same name is already open.
 #   --phase all       init + finalize + cmux (scripted use).
+#
+# init and finalize are idempotent (safe to re-run). cmux is guarded, not
+# idempotent: it refuses to create a second workspace for a live ticket.
 #
 # Usage:
 #   create-workspace.sh --ticket <ID> [--purpose <p>] [--dev-kind <k>]
@@ -146,22 +150,34 @@ load_meta() {
 # generate_agent_settings <role: worker|orchestrator> <dest-file>
 generate_agent_settings() {
   local role="$1" dest="$2" template tmp
-  if [ "$SANDBOX" = "true" ]; then
-    template="$WORKSPACE_ROOT/templates/task-$role/claude-settings.json"
-  else
-    template="$WORKSPACE_ROOT/templates/default/claude-settings-no-sandbox.json"
-  fi
   tmp="$(mktemp)"
-  render_template "$template" > "$tmp"
+  if [ "$SANDBOX" = "true" ]; then
+    render_template "$WORKSPACE_ROOT/templates/task-$role/claude-settings.json" > "$tmp"
+  elif [ "$role" = "worker" ]; then
+    # No OS sandbox: restricted-bash worker profile (tool-level guards only).
+    render_template "$WORKSPACE_ROOT/templates/default/claude-settings-no-sandbox.json" > "$tmp"
+  else
+    # No-sandbox orchestrator: keep its real profile (five privileged-script
+    # allow rules + denies) but drop the sandbox block, which has no meaning
+    # without OS enforcement. Deriving it avoids a second template drifting.
+    render_template "$WORKSPACE_ROOT/templates/task-orchestrator/claude-settings.json" \
+      | jq 'del(.sandbox)' > "$tmp"
+  fi
 
   # Worker: worktree commits write into each origin repo's .git directory —
-  # inject write access for every repo in this task.
+  # inject write access for every repo in this task. But keep .git/config and
+  # .git/hooks OUT of reach (denyWrite wins over allowWrite): otherwise the
+  # worker could rewrite core.hooksPath (disabling the pre-push org guard) or
+  # remote.origin.url (redirecting the orchestrator's push for exfiltration).
   if [ "$role" = "worker" ] && [ "$SANDBOX" = "true" ]; then
-    local r t2
+    local r t2 gitdir
     for r in $REPOS; do
+      gitdir="$WORKSPACE_ROOT/repositories/$r/.git"
       t2="$(mktemp)"
-      jq --arg p "$WORKSPACE_ROOT/repositories/$r/.git" \
-        '.sandbox.filesystem.allowWrite += [$p]' "$tmp" > "$t2"
+      jq --arg g "$gitdir" \
+        '.sandbox.filesystem.allowWrite += [$g]
+         | .sandbox.filesystem.denyWrite += [($g + "/config"), ($g + "/hooks")]' \
+        "$tmp" > "$t2"
       mv "$t2" "$tmp"
     done
   fi
@@ -261,6 +277,15 @@ phase_cmux() {
   local orch_cmd="cd $orch_dir && claude \"\$(cat initial-prompt.md)\""
 
   if cmux_available; then
+    # Guard against duplicating an already-open workspace (re-run, or
+    # /start-task while one is live) — creating a second one would spawn a
+    # rival worker on the same worktrees and re-pin .worker-target.
+    if [ -n "$(cmux_workspace_uuid_by_name "$TICKET_ID")" ]; then
+      warn "a cmux workspace named '$TICKET_ID' is already open — focus it instead of re-running --phase cmux."
+      warn "(to rebuild it: close that workspace first, then re-run.)"
+      rm -f "$META"
+      return 0
+    fi
     info "Creating cmux workspace '$TICKET_ID' (3 tabs)"
     local ws worker_surface term_surface orch_surface
     ws="$(cmux_new_workspace "$TICKET_ID" "$worker_dir" "$worker_cmd")" \

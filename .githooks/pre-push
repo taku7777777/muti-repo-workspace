@@ -30,16 +30,34 @@ if [ -z "$ALLOWED_ORGS" ]; then
   exit 0
 fi
 
-# Extract the org/user segment from the remote URL.
+# Extract host AND org/user from the remote URL.
 #   git@github.com:ORG/repo.git | ssh://git@github.com/ORG/repo.git | https://github.com/ORG/repo.git
+host=""
 org=""
 case "$REMOTE_URL" in
-  *"://"*) org="$(printf '%s' "$REMOTE_URL" | sed -E 's#^[a-z+]+://[^/]+/([^/]+)/.*#\1#')" ;;
-  *@*:*/*) org="${REMOTE_URL#*:}" ; org="${org%%/*}" ;;
+  *"://"*)
+    host="$(printf '%s' "$REMOTE_URL" | sed -E 's#^[a-z+]+://([^/@]*@)?([^/:]+).*#\2#')"
+    org="$(printf '%s' "$REMOTE_URL" | sed -E 's#^[a-z+]+://[^/]+/([^/]+)/.*#\1#')" ;;
+  *@*:*/*)
+    host="${REMOTE_URL#*@}" ; host="${host%%:*}"
+    org="${REMOTE_URL#*:}" ; org="${org%%/*}" ;;
 esac
 
-if [ -z "$org" ] || [ "$org" = "$REMOTE_URL" ]; then
-  echo "pre-push: BLOCKED: cannot determine org from remote URL '$REMOTE_URL'." >&2
+if [ -z "$org" ] || [ "$org" = "$REMOTE_URL" ] || [ -z "$host" ]; then
+  echo "pre-push: BLOCKED: cannot parse host/org from remote URL '$REMOTE_URL'." >&2
+  exit 1
+fi
+
+# Host allowlist: without this, a remote like https://evil.com/ALLOWED_ORG/repo
+# would pass the org check and exfiltrate. Defaults to github.com; override via
+# config/workspace.json allowed_push_hosts.
+ALLOWED_HOSTS="$(jq -r '(.allowed_push_hosts // ["github.com"]) | join(" ")' "$CONFIG")"
+host_ok=false
+for h in $ALLOWED_HOSTS; do
+  [ "$host" = "$h" ] && host_ok=true
+done
+if ! $host_ok; then
+  echo "pre-push: BLOCKED: push to host '$host' is not allowed (allowed: $ALLOWED_HOSTS)." >&2
   exit 1
 fi
 

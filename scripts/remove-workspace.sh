@@ -15,6 +15,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib/common.sh"
 # shellcheck source=lib/effects/worktree.sh
 . "$SCRIPT_DIR/lib/effects/worktree.sh"
+# shellcheck source=lib/effects/cmux.sh
+. "$SCRIPT_DIR/lib/effects/cmux.sh"
 
 TICKET_ID="${1:?usage: remove-workspace.sh <TICKET_ID> [--force]}"
 FORCE=false
@@ -57,10 +59,9 @@ fi
 info "Removing worktrees for $TICKET_ID"
 remove_worktrees "$TICKET_ID"
 
-if command -v cmux >/dev/null 2>&1 && [ "$(cmux ping 2>/dev/null)" = "PONG" ]; then
-  export CMUX_QUIET=1
-  ws_uuid="$(cmux workspace list --id-format both 2>/dev/null \
-    | grep -F -- "$TICKET_ID" | sed 's/^[* ]*//' | awk '{print $2}' | head -1)"
+if cmux_available; then
+  # Exact-title match (shared helper) so closing ABC-1 never tears down ABC-12.
+  ws_uuid="$(cmux_workspace_uuid_by_name "$TICKET_ID")"
   if [ -n "$ws_uuid" ]; then
     info "Closing cmux workspace $TICKET_ID"
     cmux close-workspace --workspace "$ws_uuid" >/dev/null 2>&1 \

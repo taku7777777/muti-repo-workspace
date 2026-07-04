@@ -41,7 +41,12 @@ if [ -f "$WORKER_SETTINGS" ]; then
   GIT_DIR_PATH="$WORKSPACE_ROOT/repositories/$REPO/.git"
   if ! jq -e --arg p "$GIT_DIR_PATH" '.sandbox.filesystem.allowWrite | index($p)' "$WORKER_SETTINGS" >/dev/null; then
     tmp="$(mktemp)"
-    jq --arg p "$GIT_DIR_PATH" '.sandbox.filesystem.allowWrite += [$p]' "$WORKER_SETTINGS" > "$tmp"
+    # Grant commit access but keep .git/config and .git/hooks read-only (denyWrite
+    # wins) so the worker can't disable the pre-push guard or redirect the remote.
+    jq --arg p "$GIT_DIR_PATH" \
+      '.sandbox.filesystem.allowWrite += [$p]
+       | .sandbox.filesystem.denyWrite += [($p + "/config"), ($p + "/hooks")]' \
+      "$WORKER_SETTINGS" > "$tmp"
     mv "$tmp" "$WORKER_SETTINGS"
     info "Injected commit access ($GIT_DIR_PATH) into worker settings"
   fi

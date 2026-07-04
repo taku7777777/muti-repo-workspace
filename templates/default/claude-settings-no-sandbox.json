@@ -26,6 +26,7 @@
       "Bash(curl *)",
       "Bash(wget *)"
     ],
+    "ask_note": "WARNING: without the OS sandbox, Bash(cat/grep/find *) can read files the Read-tool deny rules below block (e.g. `cat ~/.ssh/id_rsa`). No-sandbox mode gives tool-level guards only; it CANNOT protect secrets from shell reads. Use it only where the host is already trusted.",
     "deny": [
       "Read(~/.ssh/**)",
       "Read(~/.aws/**)",
@@ -35,6 +36,9 @@
       "Edit(/{{TASK_DIR}}/agents/**)",
       "Edit(/{{TASK_DIR}}/scripts/**)",
       "Edit(/{{WORKSPACE_ROOT}}/repositories/**)",
+      "Edit(/{{WORKSPACE_ROOT}}/scripts/**)",
+      "Edit(/{{WORKSPACE_ROOT}}/templates/**)",
+      "Edit(/{{WORKSPACE_ROOT}}/config/**)",
       "Edit(/{{WORKSPACE_ROOT}}/.claude/**)",
       "Edit(~/.claude.json)"
     ],

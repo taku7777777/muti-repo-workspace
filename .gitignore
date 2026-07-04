@@ -17,6 +17,7 @@
 # cloning this repo for development does not lock the session into the
 # operator sandbox. Run /setup-workspace to create it.
 /.claude/settings.json
+/.gitconfig-workspace
 
 # --- Local overrides ---
 config/workspace.local.json

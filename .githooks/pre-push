@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# pre-push — restrict push destinations to the orgs listed in
+# config/workspace.json (allowed_push_orgs).
+#
+# Installed by scripts/setup-workspace.sh for every repository and worktree
+# under this workspace via `core.hooksPath` plus a `~/.gitconfig` includeIf
+# scoped to the workspace directory. Because worktrees share the origin
+# repo's config, this hook also applies inside tasks/<TICKET>/repositories/.
+#
+# git invokes pre-push with: $1 = remote name, $2 = remote URL.
+set -euo pipefail
+
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+WORKSPACE_ROOT="$(dirname "$HOOK_DIR")"
+CONFIG="$WORKSPACE_ROOT/config/workspace.json"
+
+REMOTE_URL="${2:-}"
+
+# Fail open (warn, allow) when the config cannot be read — a broken hook
+# must not lock users out of their own repositories.
+if [ ! -f "$CONFIG" ] || ! command -v jq >/dev/null 2>&1; then
+  echo "pre-push: WARNING: cannot read $CONFIG (missing file or jq not installed); allowing push." >&2
+  exit 0
+fi
+
+ALLOWED_ORGS="$(jq -r '(.allowed_push_orgs // []) | join(" ")' "$CONFIG")"
+
+if [ -z "$ALLOWED_ORGS" ]; then
+  echo "pre-push: WARNING: allowed_push_orgs is empty in config/workspace.json; push destinations are not restricted." >&2
+  exit 0
+fi
+
+# Extract the org/user segment from the remote URL.
+#   git@github.com:ORG/repo.git | ssh://git@github.com/ORG/repo.git | https://github.com/ORG/repo.git
+org=""
+case "$REMOTE_URL" in
+  *"://"*) org="$(printf '%s' "$REMOTE_URL" | sed -E 's#^[a-z+]+://[^/]+/([^/]+)/.*#\1#')" ;;
+  *@*:*/*) org="${REMOTE_URL#*:}" ; org="${org%%/*}" ;;
+esac
+
+if [ -z "$org" ] || [ "$org" = "$REMOTE_URL" ]; then
+  echo "pre-push: BLOCKED: cannot determine org from remote URL '$REMOTE_URL'." >&2
+  exit 1
+fi
+
+for allowed in $ALLOWED_ORGS; do
+  if [ "$org" = "$allowed" ]; then
+    exit 0
+  fi
+done
+
+echo "pre-push: BLOCKED: push to org '$org' is not allowed (allowed: $ALLOWED_ORGS)." >&2
+echo "pre-push: edit allowed_push_orgs in config/workspace.json to change this." >&2
+exit 1

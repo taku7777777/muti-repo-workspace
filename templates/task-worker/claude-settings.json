@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+
+  "env": {
+    "OTEL_RESOURCE_ATTRIBUTES": "workspace={{TICKET_ID}},purpose={{PURPOSE}}"
+  },
+
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(*)"
+    ],
+    "ask": [],
+    "deny": [
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/.config/gcloud/**)",
+      "Read(~/.npmrc)",
+      "Edit(/{{TASK_DIR}}/agents/**)",
+      "Edit(/{{TASK_DIR}}/scripts/**)",
+      "Edit(/{{WORKSPACE_ROOT}}/repositories/**)",
+      "Edit(/{{WORKSPACE_ROOT}}/.claude/**)",
+      "Edit(/{{WORKSPACE_ROOT}}/scripts/**)",
+      "Edit(/{{WORKSPACE_ROOT}}/templates/**)",
+      "Edit(/{{WORKSPACE_ROOT}}/config/**)",
+      "Edit(~/.claude.json)",
+      "WebFetch",
+      "WebSearch"
+    ],
+    "additionalDirectories": [
+      "{{TASK_DIR}}",
+      "{{WORKSPACE_ROOT}}/repositories"
+    ]
+  },
+
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "allowUnsandboxedCommands": false,
+    "excludedCommands": [],
+    "filesystem": {
+      "allowWrite": [
+        "{{TASK_DIR}}/repositories",
+        "{{TASK_DIR}}/docs"
+      ],
+      "denyWrite": [
+        "{{TASK_DIR}}/agents",
+        "{{TASK_DIR}}/scripts",
+        "~/.claude.json"
+      ],
+      "denyRead": [
+        "~/.ssh",
+        "~/.aws",
+        "~/.config/gh",
+        "~/.config/gcloud",
+        "~/.npmrc"
+      ]
+    },
+    "credentials": {
+      "files": [
+        { "path": "~/.ssh", "mode": "deny" },
+        { "path": "~/.aws", "mode": "deny" },
+        { "path": "~/.config/gh", "mode": "deny" },
+        { "path": "~/.config/gcloud", "mode": "deny" },
+        { "path": "~/.npmrc", "mode": "deny" }
+      ]
+    },
+    "network": {
+      "allowedDomains": []
+    }
+  },
+
+  "enabledMcpjsonServers": []
+}

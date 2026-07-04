@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+
+  "env": {
+    "OTEL_RESOURCE_ATTRIBUTES": "workspace=ROOT"
+  },
+
+  "sandbox": {
+    "enabled": true,
+    "allowUnsandboxedCommands": false,
+    "excludedCommands": [],
+    "filesystem": {
+      "denyRead": [
+        "~/.ssh",
+        "~/.aws",
+        "~/.config/gh",
+        "~/.config/gcloud",
+        "~/.npmrc"
+      ],
+      "denyWrite": [
+        "~/.claude.json"
+      ]
+    },
+    "credentials": {
+      "files": [
+        { "path": "~/.ssh", "mode": "deny" },
+        { "path": "~/.aws", "mode": "deny" },
+        { "path": "~/.config/gh", "mode": "deny" },
+        { "path": "~/.config/gcloud", "mode": "deny" },
+        { "path": "~/.npmrc", "mode": "deny" }
+      ]
+    },
+    "network": {
+      "allowedDomains": [
+        "github.com",
+        "api.github.com",
+        "codeload.github.com",
+        "registry.npmjs.org"
+      ],
+      "deniedDomains": [
+        "uploads.github.com"
+      ]
+    }
+  },
+
+  "permissions": {
+    "allow": [
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(echo *)",
+      "Bash(printf *)",
+      "Bash(mkdir *)",
+      "Bash(jq *)",
+      "Bash(gh *)",
+      "Bash(git status*)",
+      "Bash(git log *)",
+      "Bash(git diff*)",
+      "Bash(git branch*)",
+      "Bash(git worktree list*)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(rm *)"
+    ],
+    "deny": [
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/.config/gcloud/**)",
+      "Read(~/.npmrc)",
+      "Edit(/repositories/**)",
+      "Edit(/.claude/**)",
+      "Edit(~/.claude.json)"
+    ]
+  }
+}

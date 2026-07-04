@@ -1,0 +1,21 @@
+{
+  "$schema_note": "Target repositories managed by this workspace. /setup-workspace clones every entry into repositories/<name>; /open-task creates per-task git worktrees from them. Replace the examples with your own repositories.",
+  "repositories": [
+    {
+      "name": "example-app",
+      "url": "git@github.com:your-org/example-app.git",
+      "desc": "Example application repository — replace with your own.",
+      "type": "code"
+    },
+    {
+      "name": "example-knowledge",
+      "url": "git@github.com:your-org/example-knowledge.git",
+      "desc": "Example knowledge base. type=knowledge repos are checked out sparsely in task worktrees, limited to sparse_paths for the task's purpose.",
+      "type": "knowledge",
+      "sparse_paths": {
+        "dev": ["designs"],
+        "task": ["docs"]
+      }
+    }
+  ]
+}

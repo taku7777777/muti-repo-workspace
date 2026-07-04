@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+
+  "env": {
+    "OTEL_RESOURCE_ATTRIBUTES": "workspace={{TICKET_ID}},purpose={{PURPOSE}}"
+  },
+
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash({{TASK_DIR_H}}/agents/orchestrator/.claude/skills/send-cmux-command-to-worker/scripts/send-command.sh*)",
+      "Bash({{TASK_DIR_H}}/agents/orchestrator/.claude/skills/read-worker-output/scripts/read-output.sh*)",
+      "Bash({{TASK_DIR_H}}/agents/orchestrator/.claude/skills/wait-for-worker/scripts/wait-for-worker.sh*)",
+      "Bash({{TASK_DIR_H}}/agents/orchestrator/.claude/skills/add-repository-to-worker/scripts/add-repository.sh*)",
+      "Bash({{TASK_DIR_H}}/scripts/push-create-pr.sh*)"
+    ],
+    "ask": [],
+    "deny": [
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/.config/gcloud/**)",
+      "Read(~/.npmrc)",
+      "Edit(/{{TASK_DIR}}/repositories/**)",
+      "Edit(/{{TASK_DIR}}/agents/**)",
+      "Edit(/{{TASK_DIR}}/scripts/**)",
+      "Edit(/{{WORKSPACE_ROOT}}/repositories/**)",
+      "Edit(/{{WORKSPACE_ROOT}}/.claude/**)",
+      "Edit(~/.claude.json)",
+      "WebFetch",
+      "WebSearch"
+    ],
+    "additionalDirectories": [
+      "{{TASK_DIR}}"
+    ]
+  },
+
+  "sandbox": {
+    "enabled": true,
+    "allowUnsandboxedCommands": false,
+    "excludedCommands": [
+      "{{TASK_DIR_H}}/agents/orchestrator/.claude/skills/send-cmux-command-to-worker/scripts/send-command.sh",
+      "{{TASK_DIR_H}}/agents/orchestrator/.claude/skills/send-cmux-command-to-worker/scripts/send-command.sh *",
+      "{{TASK_DIR_H}}/agents/orchestrator/.claude/skills/read-worker-output/scripts/read-output.sh",
+      "{{TASK_DIR_H}}/agents/orchestrator/.claude/skills/read-worker-output/scripts/read-output.sh *",
+      "{{TASK_DIR_H}}/agents/orchestrator/.claude/skills/wait-for-worker/scripts/wait-for-worker.sh",
+      "{{TASK_DIR_H}}/agents/orchestrator/.claude/skills/wait-for-worker/scripts/wait-for-worker.sh *",
+      "{{TASK_DIR_H}}/agents/orchestrator/.claude/skills/add-repository-to-worker/scripts/add-repository.sh",
+      "{{TASK_DIR_H}}/agents/orchestrator/.claude/skills/add-repository-to-worker/scripts/add-repository.sh *",
+      "{{TASK_DIR_H}}/scripts/push-create-pr.sh",
+      "{{TASK_DIR_H}}/scripts/push-create-pr.sh *"
+    ],
+    "filesystem": {
+      "allowWrite": [
+        "{{TASK_DIR}}/docs"
+      ],
+      "denyWrite": [
+        "{{TASK_DIR}}/agents",
+        "{{TASK_DIR}}/scripts",
+        "~/.claude.json"
+      ],
+      "denyRead": [
+        "{{TASK_DIR}}/agents",
+        "{{TASK_DIR}}/scripts",
+        "~/.ssh",
+        "~/.aws",
+        "~/.config/gh",
+        "~/.config/gcloud",
+        "~/.npmrc"
+      ]
+    },
+    "credentials": {
+      "files": [
+        { "path": "~/.ssh", "mode": "deny" },
+        { "path": "~/.aws", "mode": "deny" },
+        { "path": "~/.config/gh", "mode": "deny" },
+        { "path": "~/.config/gcloud", "mode": "deny" },
+        { "path": "~/.npmrc", "mode": "deny" }
+      ]
+    },
+    "network": {
+      "allowedDomains": []
+    }
+  },
+
+  "enabledMcpjsonServers": []
+}

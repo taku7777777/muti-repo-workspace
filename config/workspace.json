@@ -1,0 +1,18 @@
+{
+  "$schema_note": "Workspace-wide configuration. Fork this repository and edit this file (and repos.json / purposes/) for your own organization.",
+  "workspace_name": "multi-repo-workspace",
+
+  "allowed_push_orgs": [],
+  "allowed_push_orgs_note": "GitHub orgs/users that git push is allowed to target, enforced by .githooks/pre-push in every cloned repo and worktree. Empty list = no restriction (a warning is printed on push).",
+
+  "default_purpose": "dev",
+
+  "ticket_source": "manual",
+  "ticket_source_note": "Adapter used by /open-task to fetch ticket content into docs/task.md. One of the scripts in scripts/lib/ticket-sources/ (without .sh): 'manual' | 'github-issues'. Additional adapters can be dropped into that directory (see examples/ticket-sources/).",
+
+  "ticket_id_pattern": "^[A-Z]+-[A-Za-z0-9_-]+$",
+  "ticket_id_pattern_note": "Ticket IDs must match this pattern. The prefix is required and never auto-added.",
+
+  "branch_prefix": "feat/",
+  "branch_prefix_note": "Task worktree branches are named <branch_prefix><TICKET_ID>."
+}

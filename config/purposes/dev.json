@@ -1,0 +1,9 @@
+{
+  "$schema_note": "Purpose definition. The set of available purposes is discovered by scanning config/purposes/*.json — add or remove files freely. See examples/purposes/ for more elaborate setups.",
+  "description": "Feature development, bug fixes and refactoring across code repositories.",
+  "default_repos": ["example-app"],
+  "mcp_servers": [],
+  "mcp_servers_note": "Names of servers from templates/default/mcp.json to enable for tasks of this purpose. Empty = none.",
+  "dev_kinds": ["feature", "bug", "improvement", "unknown"],
+  "dev_kinds_note": "Optional sub-classification asked by /open-task. A matching templates/purposes/dev/kinds/<kind>/ directory can override templates per kind; otherwise the purpose-level templates are used."
+}

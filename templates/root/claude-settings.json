@@ -17,9 +17,7 @@
         "~/.config/gcloud",
         "~/.npmrc"
       ],
-      "denyWrite": [
-        "~/.claude.json"
-      ]
+      "denyWrite": []
     },
     "credentials": {
       "files": [

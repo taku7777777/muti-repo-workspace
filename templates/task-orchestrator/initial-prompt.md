@@ -1,0 +1,1 @@
+You are the orchestrator for task {{TICKET_ID}}. Read ./CLAUDE.md completely — it defines your operating table and loop. Then read ../../docs/task.md for context. The worker has already been started with its initial instruction: begin by arming wait-for-worker (run_in_background: true) and end your turn; act on its RESULT notification per CLAUDE.md.

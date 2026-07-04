@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Worktree side-effect helpers. Requires common.sh to be sourced first.
+#
+# NOTE: the primary path for worktree creation during /open-task is Claude
+# executing `git -C ...` directly (see the open-task skill, Step "worktrees") —
+# these helpers exist for the scripted/unsandboxed paths (create-workspace.sh
+# without --skip-worktrees, add-repository-to-worker). The rules are identical:
+# relative target paths, `git -C`, no command chaining.
+
+# create_worktree <repo-name> <ticket-id> <branch> <purpose>
+# Creates tasks/<ticket>/repositories/<repo> as a worktree of
+# repositories/<repo> on <branch>. Sparse checkout for knowledge repos.
+create_worktree() {
+  local repo="$1" ticket="$2" branch="$3" purpose="$4"
+  local root origin target_rel target_abs repo_type
+  root="$(workspace_root)"
+  origin="$root/repositories/$repo"
+  target_rel="../../tasks/$ticket/repositories/$repo"
+  target_abs="$root/tasks/$ticket/repositories/$repo"
+
+  [ -d "$origin/.git" ] || die "repository '$repo' is not cloned (run /setup-workspace first)"
+  if [ -d "$target_abs" ]; then
+    log "  - $repo: worktree already exists, skipping"
+    return 0
+  fi
+
+  repo_type="$(repo_field "$repo" type)"
+  local checkout_flag=""
+  [ "$repo_type" = "knowledge" ] && checkout_flag="--no-checkout"
+
+  # Use a RELATIVE target path so the worktree link stays valid if the
+  # workspace directory moves. Never chain commands.
+  if git -C "$origin" show-ref --verify --quiet "refs/heads/$branch"; then
+    info "  - $repo: adding worktree on existing local branch $branch"
+    git -C "$origin" worktree add $checkout_flag "$target_rel" "$branch"
+  elif git -C "$origin" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+    info "  - $repo: adding worktree tracking origin/$branch"
+    git -C "$origin" worktree add $checkout_flag --track -b "$branch" "$target_rel" "origin/$branch"
+  else
+    info "  - $repo: adding worktree on new branch $branch"
+    git -C "$origin" worktree add $checkout_flag -b "$branch" "$target_rel"
+  fi
+
+  if [ "$repo_type" = "knowledge" ]; then
+    local paths
+    paths="$(jq -r --arg n "$repo" --arg p "$purpose" \
+      '.repositories[] | select(.name == $n) | .sparse_paths[$p] // [] | join(" ")' \
+      "$root/config/repos.json")"
+    if [ -n "$paths" ]; then
+      info "  - $repo: sparse checkout ($paths)"
+      # shellcheck disable=SC2086
+      git -C "$target_abs" sparse-checkout set --cone $paths
+      git -C "$target_abs" checkout "$branch"
+    else
+      git -C "$target_abs" checkout "$branch"
+    fi
+  fi
+}
+
+# remove_worktrees <ticket-id> — detach all worktrees of a task, then prune.
+remove_worktrees() {
+  local ticket="$1" root wt repo origin
+  root="$(workspace_root)"
+  for wt in "$root/tasks/$ticket/repositories"/*/; do
+    [ -d "$wt" ] || continue
+    repo="$(basename "$wt")"
+    origin="$root/repositories/$repo"
+    if [ -d "$origin/.git" ]; then
+      info "  - removing worktree $repo"
+      git -C "$origin" worktree remove --force "$wt" 2>/dev/null \
+        || warn "    could not remove worktree $wt (removing directory manually)"
+      git -C "$origin" worktree prune
+    fi
+    rm -rf "$wt"
+  done
+}

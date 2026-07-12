@@ -45,13 +45,20 @@ Fails fast on unknown purpose/repos or un-cloned repos.
 
 ## Step 5 — task.md + worktrees (you do this part)
 
-**5a. `tasks/<T>/docs/task.md`**: overwrite the scaffold with the FULL ticket
-body from Step 1 (keep the template's heading structure). The worker starts
-from this file with no other context — it must be self-contained.
+**5a. `tasks/<T>/docs/task.md`**: CREATE this file yourself with the FULL
+ticket body from Step 1, following the heading structure of the purpose's
+`task.md` template (`templates/purposes/<p>/task.md` or
+`templates/default/task.md`). It does not exist yet at this point — finalize
+(Step 6) only scaffolds it when missing, so a file you write here is kept
+as-is. The worker starts from this file with no other context — it must be
+self-contained.
 
-**5b. Worktrees** — create them yourself with direct git commands
-(the sandbox blocks `git worktree` when buried inside scripts; direct
-execution works). CRITICAL rules:
+**5b. Worktrees** — create them yourself with direct git commands.
+(Note: `worktree add` itself is sandbox-compatible — it only writes
+`.git/worktrees/`, unlike `git init`/`clone` which are always blocked
+(verified S8-c vs S8-a). Direct execution is simply the tested, working
+path here; if a wrapped/scripted run fails with EPERM, use direct
+commands rather than widening anything.) CRITICAL rules:
 - Always `git -C repositories/<repo> ...` from the workspace root; never `cd`.
 - Target path must be RELATIVE: `../../tasks/<T>/repositories/<repo>`.
 - One command per Bash call — no `&&`, no `;`.

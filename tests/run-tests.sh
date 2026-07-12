@@ -127,6 +127,31 @@ assert_status "pre-push: empty orgs still allows allowed host" 0 run_hook 'https
 assert_status "pre-push: empty orgs still BLOCKS bad host" 1 run_hook 'https://evil.example/anyone/repo.git'
 rm -rf "$hookdir"
 
+# --- worktree_gitdir (real git fixture) ------------------------------------------
+# The resolved gitdir feeds the worker's config.worktree denyWrite pin — a wrong
+# path here silently drops the C-2 redirect guard, so exercise the real thing.
+# shellcheck source=../scripts/lib/effects/worktree.sh
+. "$ROOT/scripts/lib/effects/worktree.sh"
+wt_ticket="ZZTEST-wtgd$$"
+wt_origin="$(mktemp -d)"
+git -C "$wt_origin" -c init.defaultBranch=main init -q
+git -C "$wt_origin" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+mkdir -p "$ROOT/tasks/$wt_ticket/repositories"
+git -C "$wt_origin" worktree add -q -b "test-$wt_ticket" \
+  "$ROOT/tasks/$wt_ticket/repositories/fixture-repo" >/dev/null 2>&1
+resolved="$(worktree_gitdir fixture-repo "$wt_ticket")" || resolved=""
+# NB: compare via a suffix pattern — on macOS, mktemp returns /var/... while
+# git resolves the realpath /private/var/..., so a prefix match would fail.
+assert_match "worktree_gitdir: resolves the private gitdir" \
+  "/\.git/worktrees/fixture-repo$" "$resolved"
+assert_status "worktree_gitdir: config.worktree pin path is derivable" 0 \
+  test -n "$resolved"
+assert_status "worktree_gitdir: missing worktree returns non-zero" 1 \
+  worktree_gitdir no-such-repo "$wt_ticket"
+git -C "$wt_origin" worktree remove --force \
+  "$ROOT/tasks/$wt_ticket/repositories/fixture-repo" >/dev/null 2>&1
+rm -rf "$ROOT/tasks/$wt_ticket" "$wt_origin"
+
 echo ""
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

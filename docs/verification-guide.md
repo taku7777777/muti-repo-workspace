@@ -43,8 +43,18 @@ Check under `tasks/TEST-001/`:
 - knowledge repos contain only their `sparse_paths.<purpose>` directories
 - `agents/{worker,orchestrator}/` each have `CLAUDE.md`, `initial-prompt.md`,
   `.claude/settings.json` (valid JSON: `jq . <file>`), and an empty `.git` file
-- worker settings `sandbox.filesystem.allowWrite` includes
-  `repositories/<repo>/.git` for every task repo
+- worker settings `sandbox.filesystem.allowWrite` does **NOT** include any
+  origin `.git` (commits don't need it — S8-d), and `denyWrite` pins, for
+  every task repo: `repositories/<repo>/.git/config`, `.../.git/hooks`, and
+  the worktree's private gitdir `config.worktree`
+  (`git -C tasks/TEST-001/repositories/<repo> rev-parse --absolute-git-dir`
+  to see the expected prefix)
+- `.task-meta.json` exists at the task root with the correct
+  `purpose`/`repos`/`branch` (permanent metadata — `/list-task` and
+  add-repository read from it)
+- worker settings `permissions.additionalDirectories` lists **only** the task
+  dir — no `repositories/` entry at all (origins are intentionally not added;
+  S2-o would otherwise widen the OS write boundary to the shared clones)
 - **byte-match**: every entry of the orchestrator's
   `sandbox.excludedCommands` (without trailing ` *`) appears verbatim in
   `agents/orchestrator/CLAUDE.md`, and the file at its `~`-expanded path exists

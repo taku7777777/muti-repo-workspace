@@ -48,7 +48,10 @@ allowlisted scripts — never general shell.
 
 - macOS (sandboxing uses Claude Code's macOS sandbox; `--no-sandbox` mode works elsewhere)
 - `git`, `jq`, `curl`, [GitHub CLI `gh`](https://cli.github.com/), SSH access to your repos
-- [Claude Code](https://claude.com/claude-code)
+- [Claude Code](https://claude.com/claude-code) **≥ 2.1.149** — the worker
+  sandbox grants no write access to origin `.git` directories; worktree
+  commits rely on behavior verified from that version (sandbox-experiments
+  S8-d)
 - [`cmux`](https://github.com/wandb/cmux) — optional but strongly recommended
   (without it you get clipboard-fallback single-session mode)
 

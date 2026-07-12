@@ -7,9 +7,7 @@
 
   "permissions": {
     "defaultMode": "acceptEdits",
-    "allow": [
-      "Bash(*)"
-    ],
+    "allow": [],
     "ask": [],
     "deny": [
       "Read(~/.ssh/**)",
@@ -29,8 +27,7 @@
       "WebSearch"
     ],
     "additionalDirectories": [
-      "{{TASK_DIR}}",
-      "{{WORKSPACE_ROOT}}/repositories"
+      "{{TASK_DIR}}"
     ]
   },
 
@@ -47,6 +44,11 @@
       "denyWrite": [
         "{{TASK_DIR}}/agents",
         "{{TASK_DIR}}/scripts",
+        "{{WORKSPACE_ROOT}}/.githooks",
+        "{{WORKSPACE_ROOT}}/.claude",
+        "{{WORKSPACE_ROOT}}/config",
+        "{{WORKSPACE_ROOT}}/scripts",
+        "{{WORKSPACE_ROOT}}/templates",
         "~/.claude.json"
       ],
       "denyRead": [

@@ -57,6 +57,17 @@ create_worktree() {
   fi
 }
 
+# worktree_gitdir <repo-name> <ticket-id> — print the absolute private gitdir
+# of the task's worktree for <repo> (<origin>/.git/worktrees/<name>; the name
+# is assigned by git and can differ from <repo> on collisions, so resolve it —
+# never guess). Returns non-zero if the worktree does not exist yet.
+worktree_gitdir() {
+  local wt
+  wt="$(workspace_root)/tasks/$2/repositories/$1"
+  [ -d "$wt" ] || return 1
+  git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null
+}
+
 # remove_worktrees <ticket-id> — detach all worktrees of a task, then prune.
 remove_worktrees() {
   local ticket="$1" root wt repo origin

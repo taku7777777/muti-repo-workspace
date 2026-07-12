@@ -162,28 +162,54 @@ generate_agent_settings() {
       | jq 'del(.sandbox)' > "$tmp"
   fi
 
-  # Worker: worktree commits write into each origin repo's .git directory —
-  # inject write access for every repo in this task. Keep .git/config and
-  # .git/hooks OUT of reach (denyWrite wins over allowWrite) as a first layer.
-  # NOTE: this is NOT sufficient on its own — per-worktree config
-  # (.git/worktrees/<name>/config.worktree) lives elsewhere and stays writable,
-  # so a worker could still set core.hooksPath / remote.origin.url there. The
-  # authoritative guard is at the single publish path: push-create-pr.sh forces
-  # -c core.hooksPath so the pre-push host/org hook always runs, and the hook
-  # enforces the host allowlist unconditionally. Do not rely on this denyWrite
-  # as the boundary; it only raises the bar.
+  # Worker: worktree git operations reach the origin's shared .git through
+  # git/Claude Code's own worktree handling — NO allowWrite injection is
+  # needed for commits (verified: sandbox-experiments S8-d, Claude Code
+  # >= 2.1.149). Keeping origin .git out of allowWrite, we instead inject
+  # denyWrite pins for the redirect surface. denyWrite beats every allow —
+  # including permission-rule merges from a settings.local.json written by a
+  # "don't ask again" approval (S2-n) — so these hold even if the permission
+  # layer drifts:
+  #   .git/config, .git/hooks              — remote/hook redirect on the origin
+  #   <gitdir>/config.worktree             — the per-worktree redirect vector
+  #     (core.hooksPath / remote.origin.url; the C-2 finding). git never
+  #     writes this file during add/commit; sparse-checkout setup does, but
+  #     that runs at task creation, outside the worker sandbox.
+  # Still not a boundary on its own: the authoritative guard remains the
+  # single publish path (push-create-pr.sh forces -c core.hooksPath so the
+  # pre-push host/org hook always runs).
   if [ "$role" = "worker" ] && [ "$SANDBOX" = "true" ]; then
-    local r t2 gitdir
+    local r t2 gitdir wt_gitdir wt_pin
     for r in $REPOS; do
       gitdir="$WORKSPACE_ROOT/repositories/$r/.git"
+      wt_pin=""
+      if wt_gitdir="$(worktree_gitdir "$r" "$TICKET_ID")"; then
+        wt_pin="$wt_gitdir/config.worktree"
+      else
+        # A sandboxed worker without this pin has an open C-2 redirect vector,
+        # so refuse to generate its settings rather than warn-and-continue.
+        # In the normal flow worktrees are created (open-task Step 5b, or
+        # phase_finalize) before this runs, so this only fires on a genuinely
+        # missing worktree — which must be created before finalize.
+        die "worktree for '$r' not found — cannot pin its config.worktree (the C-2 redirect vector). Create the worktree before finalize, then re-run."
+      fi
       t2="$(mktemp)"
-      jq --arg g "$gitdir" \
-        '.sandbox.filesystem.allowWrite += [$g]
-         | .sandbox.filesystem.denyWrite += [($g + "/config"), ($g + "/hooks")]' \
+      jq --arg c "$gitdir/config" --arg h "$gitdir/hooks" --arg w "$wt_pin" \
+        '.sandbox.filesystem.denyWrite += ([$c, $h] + (if $w == "" then [] else [$w] end))' \
         "$tmp" > "$t2"
       mv "$t2" "$tmp"
     done
   fi
+
+  # Worker origin access: deliberately NOT added to additionalDirectories.
+  # The worker operates on its worktrees under {{TASK_DIR}} (already covered by
+  # additionalDirectories), so it never needs to read the origins directly.
+  # Adding an origin to additionalDirectories would ALSO widen the OS-level
+  # Bash *write* boundary to that origin's working tree (verified
+  # sandbox-experiments S2-o: additionalDirectories is a fifth merge source of
+  # the effective write boundary, not just a read/auto-approve widener) —
+  # letting a worker mutate the shared clone outside its own task. So we omit
+  # it entirely and supersede the earlier per-repo read grant (review Low-1).
 
   # MCP servers selected by the purpose.
   local t3
@@ -200,6 +226,31 @@ phase_finalize() {
   [ -n "$DEV_KIND" ] && kind_arg="$DEV_KIND"
 
   MCP_SERVERS_JSON="$(jq -c '.mcp_servers // []' "$PURPOSE_JSON")"
+
+  # Validate the purpose's MCP server names against the template catalog — a
+  # typo would otherwise be dropped silently at the filter step (review Low-15).
+  local s
+  for s in $(jq -r '.[]' <<<"$MCP_SERVERS_JSON"); do
+    jq -e --arg k "$s" '.mcpServers | has($k)' "$WORKSPACE_ROOT/templates/default/mcp.json" >/dev/null \
+      || warn "purpose '$PURPOSE' references MCP server '$s' which is not in templates/default/mcp.json — it will be ignored"
+  done
+
+  # Permanent task metadata — survives the cmux phase (which deletes
+  # .workspace-meta.json). Source of truth for purpose/repos after setup
+  # (review Low-8); the OTEL scrape in add-repository/list-task remains only
+  # as a fallback for tasks created before this file existed.
+  local repos_meta="[]"
+  if [ -n "$REPOS" ]; then
+    # shellcheck disable=SC2086
+    repos_meta="$(printf '%s\n' $REPOS | jq -R . | jq -s .)"
+  fi
+  jq -n \
+    --arg ticket "$TICKET_ID" --arg purpose "$PURPOSE" --arg dev_kind "$DEV_KIND" \
+    --arg title "$TITLE" --arg url "$TICKET_URL" --arg branch "$BRANCH" \
+    --argjson sandbox "$SANDBOX" --argjson repos "$repos_meta" \
+    '{ticket: $ticket, purpose: $purpose, dev_kind: $dev_kind, title: $title,
+      ticket_url: $url, branch: $branch, sandbox: $sandbox, repos: $repos}' \
+    > "$TASK_DIR/.task-meta.json"
 
   # REPOS_LIST for templates (single line; render_template is line-based).
   local r list=""
@@ -293,6 +344,13 @@ phase_cmux() {
     if [ -n "$(cmux_workspace_uuid_by_name "$TICKET_ID")" ]; then
       warn "a cmux workspace named '$TICKET_ID' is already open — focus it instead of re-running --phase cmux."
       warn "(to rebuild it: close that workspace first, then re-run.)"
+      # Review Low-9: don't imply the live workspace is functional if it was
+      # created without a pin — messaging would fail on every send.
+      if [ ! -f "$orch_dir/.claude/skills/.worker-target" ]; then
+        warn "NOTE: this task has NO pinned .worker-target, so orchestrator→worker"
+        warn "messaging will not work in that workspace. Close it and re-run"
+        warn "--phase cmux to create a properly pinned one."
+      fi
       rm -f "$META"
       return 0
     fi
@@ -300,7 +358,8 @@ phase_cmux() {
     local ws worker_surface term_surface orch_surface
     ws="$(cmux_new_workspace "$TICKET_ID" "$worker_dir" "$worker_cmd")" \
       || die "failed to create cmux workspace"
-    worker_surface="$(cmux_first_surface_uuid "$ws")"
+    worker_surface="$(cmux_first_surface_uuid "$ws")" \
+      || die "could not resolve worker surface UUID"
     [ -n "$worker_surface" ] || die "could not resolve worker surface UUID"
     cmux_rename_tab "$ws" "$worker_surface" "Worker Claude"
 

@@ -1,6 +1,5 @@
 {
-  "$schema_note": "Workspace-wide configuration. Fork this repository and edit this file (and repos.json / purposes/) for your own organization.",
-  "workspace_name": "multi-repo-workspace",
+  "$schema_note": "Workspace-wide configuration. Fork this repository and edit this file (and repos.json / purposes/) for your own organization. This file is the ONLY config the scripts read — there is no local override file.",
 
   "allowed_push_orgs": [],
   "allowed_push_orgs_note": "GitHub orgs/users that git push is allowed to target, enforced by .githooks/pre-push in every cloned repo and worktree. Empty list = no restriction (a warning is printed on push).",

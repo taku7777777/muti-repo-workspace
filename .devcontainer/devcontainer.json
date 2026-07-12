@@ -1,0 +1,37 @@
+{
+  // Phase 0 dev container — compose-backed. The editor / SDK harness attach to
+  // the `coder` service, which is caged on an internal-only network and can
+  // reach the internet ONLY through the `egress-proxy` sidecar's allowlist.
+  "name": "mrw-phase0-coder",
+
+  "dockerComposeFile": ["docker-compose.yml"],
+  "service": "coder",
+  // Start BOTH services. Omitting the proxy would leave the coder with no
+  // egress path at all.
+  "runServices": ["coder", "egress-proxy"],
+
+  // Matches the bind mount target in docker-compose.yml.
+  "workspaceFolder": "/workspaces/muti-repo-workspace",
+
+  // Non-root is required for bypassPermissions / --dangerously-skip-permissions.
+  "remoteUser": "node",
+  // Use the compose service's `command` (sleep infinity), don't override it.
+  "overrideCommand": false,
+
+  // Block until the boundary is proven before hands-on work begins.
+  "waitFor": "postCreateCommand",
+  // Tear the whole compose project down when the dev container stops.
+  "shutdownAction": "stopCompose",
+
+  // API-key SDK pipeline needs no forwarded ports (no server, no OAuth
+  // localhost callback). Kept explicit and empty.
+  "forwardPorts": [],
+
+  // Install harness deps (through the allowlisted proxy) and PROVE the egress
+  // boundary. Runs inside the locked-down network.
+  "postCreateCommand": "bash .devcontainer/postCreate.sh",
+
+  "remoteEnv": {
+    "DISABLE_AUTOUPDATER": "1"
+  }
+}

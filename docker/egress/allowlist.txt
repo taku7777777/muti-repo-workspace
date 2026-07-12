@@ -1,0 +1,37 @@
+# Phase 0 egress allowlist (Squid dstdomain). One entry per line.
+# A leading dot matches subdomains too (e.g. .github.com matches api.github.com).
+#
+# PRINCIPLE: keep this as SMALL as possible. Every entry is a potential exfil
+# sink for a prompt-injected coder (traffic to it looks legitimate — it goes
+# "through the proxy"). Only add a host when a Phase 0 task genuinely needs it.
+
+# --- REQUIRED: Anthropic inference (the SDK / CLI endpoint) ---
+api.anthropic.com
+
+# --- Node / npm: needed by the harness `npm ci` and (npm-based) test gates ---
+registry.npmjs.org
+
+# --- DELIBERATELY OMITTED (do not re-add without reading this) ----------------
+# sentry.io          -> REMOVED (review, blocking): a public MULTI-TENANT
+#                       ingestion host. A prompt-injected coder can POST repo
+#                       contents and the ANTHROPIC_API_KEY to an attacker-owned
+#                       project via a public DSN — a working exfil channel that
+#                       "goes through the proxy" legitimately (a C-3-style
+#                       $(curl ...) revival for this one sink). The harness sets
+#                       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1, so nothing
+#                       needs it. NEVER add a multi-tenant sink to this list.
+# statsig.anthropic.com -> omitted (Anthropic feature-flag telemetry; disabled
+#                       by CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1). Add back
+#                       ONLY if a run actually requires it.
+# .github.com / .githubusercontent.com -> omitted in Phase 0. The repo is
+#                       bind-mounted (no clone/fetch needed) and harness deps
+#                       come from npm. IMPORTANT: domain allowlisting CANNOT
+#                       distinguish `git fetch` from `git push` (same host:port),
+#                       so allowing github.com would make push network-reachable
+#                       — Phase 0's "the coder cannot push" guarantee would then
+#                       rest ONLY on credential-absence (enforced + tested by
+#                       scripts/egress-selfcheck.sh). If a target repo genuinely
+#                       needs git+https deps/submodules, add `.github.com` here
+#                       AND keep the no-credential invariant. Real publishing is
+#                       the later publish-broker phase, not this.
+# pypi.org / files.pythonhosted.org -> add if the target repo's test uses pip.

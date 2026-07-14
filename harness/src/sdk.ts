@@ -70,7 +70,8 @@ export function baseOptions(extra: Partial<Options>): Options {
     allowDangerouslySkipPermissions: true,
     // Load the repo's CLAUDE.md / .claude settings, but nothing user-global.
     settingSources: ["project"],
-    // Headless auth: the bundled CLI subprocess reads ANTHROPIC_API_KEY.
+    // Headless auth: the bundled CLI subprocess reads CLAUDE_CODE_OAUTH_TOKEN
+    // (subscription) or ANTHROPIC_API_KEY from the inherited env.
     env: process.env as Record<string, string | undefined>,
     stderr: (d: string) => process.stderr.write(d),
     ...extra,
@@ -93,7 +94,13 @@ export async function runStructuredQuery<T>(
     prompt,
     options: baseOptions({
       // The one and only channel the state machine reads back from the model.
-      outputFormat: { type: "json_schema", schema: z.toJSONSchema(schema) },
+      // target: draft-7 — the bundled Claude Code CLI validates the schema with
+      // ajv (draft-07); Zod v4's default 2020-12 meta-schema ref is unresolvable
+      // there ("no schema with key or ref …/draft/2020-12/schema").
+      outputFormat: {
+        type: "json_schema",
+        schema: z.toJSONSchema(schema, { target: "draft-7" }),
+      },
       ...extraOptions,
     }),
   });

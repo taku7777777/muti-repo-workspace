@@ -15,7 +15,7 @@ Phase 0 は、Claude Agent SDK のコーディング harness が **push・exfilt
 | `.devcontainer/docker-compose.yml` | 境界を形成する2つのサービス + 2つのネットワーク。 |
 | `.devcontainer/coder.Dockerfile` | Node 20 + git/jq/gh + Claude Code CLI、非 root の `node` ユーザ。 |
 | `.devcontainer/postCreate.sh` | ツールを proxy に配線し、harness の依存をインストールし、self-check を走らせる。 |
-| `.devcontainer/.env.example` | 実行時のみの `ANTHROPIC_API_KEY` の雛形。 |
+| `scripts/devcontainer-up.sh` | macOS Keychain から認証情報を注入してスタックを起動する — ワークツリーに平文の秘密を置かない。 |
 | `docker/egress/` | egress ゲートウェイ: Squid + 焼き込み済み allowlist + entrypoint。 |
 | `scripts/egress-selfcheck.sh` | 境界が閉じておりかつ使えることを coder 側から証明する。 |
 | `harness/` | 専用の SDK オーケストレータのスケルトン(plan → implement → test → approve → publish-stub)。 |
@@ -67,18 +67,22 @@ NET_ADMIN ゲートウェイより厳密に権限が小さく、TLS 傍受なし
 `dockerComposeFile` もこのプラグインを必要とする。
 
 ```bash
-# 1. 実行時のみの API キーを渡す(コミットしない、焼き込まない)。
-cp .devcontainer/.env.example .devcontainer/.env
-$EDITOR .devcontainer/.env          # ANTHROPIC_API_KEY を設定
+# 1. Anthropic の認証情報を macOS Keychain に保存する(一度だけ。コミットしない、
+#    焼き込まない、ワークツリーにも書かない)。
+#    Pro/Max サブスクリプション:  claude setup-token   # 1年有効の OAuth トークン(ブラウザ、初回のみ)
+security add-generic-password -a "$USER" -s claude-code-oauth-token -w '<token>'
+#    (従量課金の代替: 代わりにシェルで ANTHROPIC_API_KEY を export する)
 
-# 2a. VS Code / Cursor で開く: "Dev Containers: Reopen in Container"。
-#     postCreate が harness の依存をインストールし egress self-check を走らせる。
-
-# 2b. または手動で立ち上げて境界を証明する:
-docker compose -f .devcontainer/docker-compose.yml up -d --build
+# 2. 立ち上げて境界を証明する。スクリプトが Keychain から認証情報を取り出し、
+#    シェル環境変数経由で渡す — compose に env_file は無い。
+scripts/devcontainer-up.sh --build
 docker compose -f .devcontainer/docker-compose.yml exec coder \
   bash scripts/egress-selfcheck.sh
 ```
+
+VS Code / Cursor の "Reopen in Container" も使えるが、compose を実行するプロセスの
+環境に認証情報が必要 — export したシェルからエディタを起動するか、先に
+`scripts/devcontainer-up.sh` で起動してからアタッチする。
 
 期待される self-check の結果: `example.com` は**ブロック**、`api.anthropic.com`
 は**到達可能**、直接(no-proxy)の egress は**ルートなし** → `egress-selfcheck: OK`。
@@ -123,8 +127,11 @@ npm run orchestrate -- "add a --version flag to the CLI"
 - **Multi-repo** のオーケストレーション。
 - **TLS 終端 / L7 の堅牢化**(パス/メソッド/ボディのフィルタリングには SSL-bump +
   CA が必要になり、Phase 0 では意図的に避けている)。
-- **本物の secrets ストア。** `.env` はローカル開発のみで十分。値は `docker inspect`
-  で見える。
+- **コンテナランタイムからの認証情報の秘匿。** at rest では macOS Keychain のみに
+  存在する(ワークツリーに平文なし)が、実行中のコンテナ env は `docker inspect` で
+  見える — coder 自身が API を呼ぶ以上、これは避けられない。封じ込めは egress
+  allowlist が担う: 出口が `api.anthropic.com` だけなので、プロンプトインジェクション
+  された coder に exfiltrate 先は無い。
 - **allowlist されたホストの悪用を防ぐこと**(例: 悪意ある npm パッケージ)。Phase 0
   はトラフィックが*どこへ*行けるかをゲートするのであって、信頼されたホストが*何を*
   返すかはゲートしない。

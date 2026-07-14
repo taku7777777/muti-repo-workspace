@@ -129,11 +129,11 @@ coder は `caged`(internal)ネットワークのみに留まり、github egress 
 唯一の新しい surface は共有 socket だけ。
 
 ```bash
-# 1. Coder key goes in .env; the broker token goes in the SHELL, never in .env.
-cp .devcontainer/.env.example .devcontainer/.env      # ANTHROPIC_API_KEY for the coder
-# Export the push token in your shell so compose interpolates it into the BROKER
-# ONLY. Do NOT append it to .devcontainer/.env — that file is the coder's env_file,
-# so a token there would leak into the caged coder (which must hold no token).
+# 1. 両方の認証情報はホストシェルから渡す — ワークツリーには何も書かない。
+#    coder の Anthropic 認証情報は scripts/devcontainer-up.sh が macOS Keychain
+#    から読む(または手動 export)。broker の push トークンはここで export し、
+#    compose が BROKER のみに interpolate する。互いのコンテナには決して届かない:
+#    coder は push トークンを持たず、broker は Anthropic 認証情報を持たない。
 export BROKER_GITHUB_TOKEN=ghs_xxx
 
 # 2. Edit config/broker-policy.json (allowed_push_orgs/hosts, branch_prefix). It is

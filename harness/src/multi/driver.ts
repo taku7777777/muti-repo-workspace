@@ -329,8 +329,10 @@ export async function runDriver(args: DriverArgs): Promise<number> {
 // CLI entry
 // ---------------------------------------------------------------------------
 export async function cli(): Promise<number> {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error("ANTHROPIC_API_KEY is not set — inject it via the container env / .env.");
+  if (!process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    console.error(
+      "No Anthropic credential — set CLAUDE_CODE_OAUTH_TOKEN (subscription) or ANTHROPIC_API_KEY in the container env (host shell → scripts/devcontainer-up.sh).",
+    );
     return 2;
   }
   const args = parseArgs(process.argv.slice(2));

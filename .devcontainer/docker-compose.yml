@@ -64,10 +64,15 @@ services:
       # and NO github egress. Unset this to fall back to the Phase-1 publish stub.
       # The broker runs in its OWN container (`broker` service below), on `egress`.
       BROKER_SOCKET: /run/broker/publish.sock
-    # ANTHROPIC_API_KEY is injected at RUNTIME from a gitignored .env — never
-    # baked into the image, never a host secret mount.
-    env_file:
-      - .env
+      # Anthropic auth — passed through from the HOST SHELL at `docker compose up`
+      # time (see scripts/devcontainer-up.sh, which reads the macOS Keychain).
+      # No env_file: the secret never exists as plaintext inside the worktree.
+      # Null-value passthrough — a variable unset on the host is OMITTED from the
+      # container env entirely (an empty string could shadow the other credential).
+      # Set exactly one: CLAUDE_CODE_OAUTH_TOKEN (Pro/Max subscription, minted
+      # with `claude setup-token`) or ANTHROPIC_API_KEY (pay-as-you-go).
+      CLAUDE_CODE_OAUTH_TOKEN:
+      ANTHROPIC_API_KEY:
     volumes:
       # Repo bind mount is declared HERE (compose), not via workspaceMount.
       - ..:/workspaces/muti-repo-workspace:cached

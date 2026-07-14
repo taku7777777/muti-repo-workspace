@@ -137,11 +137,12 @@ Desktop for macOS, where a host-process + host-path-bind-mounted unix socket doe
 surface is the shared socket.
 
 ```bash
-# 1. Coder key goes in .env; the broker token goes in the SHELL, never in .env.
-cp .devcontainer/.env.example .devcontainer/.env      # ANTHROPIC_API_KEY for the coder
-# Export the push token in your shell so compose interpolates it into the BROKER
-# ONLY. Do NOT append it to .devcontainer/.env — that file is the coder's env_file,
-# so a token there would leak into the caged coder (which must hold no token).
+# 1. Both credentials come from the HOST SHELL — nothing is written into the
+#    worktree. The coder's Anthropic credential is read from the macOS Keychain
+#    by scripts/devcontainer-up.sh (or exported manually); the broker push token
+#    is exported here so compose interpolates it into the BROKER ONLY. Neither
+#    ever reaches the other container: the coder holds no push token, the broker
+#    holds no Anthropic credential.
 export BROKER_GITHUB_TOKEN=ghs_xxx
 
 # 2. Edit config/broker-policy.json (allowed_push_orgs/hosts, branch_prefix). It is

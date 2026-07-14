@@ -321,9 +321,9 @@ export async function runOrchestrator(
 // runOrchestrator against REPO_DIR (or cwd) and maps the result to an exit code.
 // ---------------------------------------------------------------------------
 export async function cli(): Promise<number> {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
     console.error(
-      "ANTHROPIC_API_KEY is not set — inject it via the container env / .env.",
+      "No Anthropic credential — set CLAUDE_CODE_OAUTH_TOKEN (subscription) or ANTHROPIC_API_KEY in the container env (host shell → scripts/devcontainer-up.sh).",
     );
     return 2;
   }

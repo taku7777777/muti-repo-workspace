@@ -13,7 +13,7 @@ boundary**, not a permission prompt.
 | `.devcontainer/docker-compose.yml` | The two services + two networks that form the boundary. |
 | `.devcontainer/coder.Dockerfile` | Node 20 + git/jq/gh + Claude Code CLI, non-root `node` user. |
 | `.devcontainer/postCreate.sh` | Wires tools to the proxy, installs harness deps, runs the self-check. |
-| `.devcontainer/.env.example` | Template for the runtime-only `ANTHROPIC_API_KEY`. |
+| `scripts/devcontainer-up.sh` | Boots the stack with auth injected from the macOS Keychain — no plaintext credential in the worktree. |
 | `docker/egress/` | The egress gateway: Squid + baked-in allowlist + entrypoint. |
 | `scripts/egress-selfcheck.sh` | Proves the boundary is closed AND usable, from the coder. |
 | `harness/` | The bespoke SDK orchestrator skeleton (plan → implement → test → approve → publish-stub). |
@@ -64,18 +64,23 @@ Compose v2 plugin** — check with `docker compose version`. If it prints
 `dockerComposeFile` also requires this plugin.
 
 ```bash
-# 1. Provide a runtime-only API key (never committed, never baked in).
-cp .devcontainer/.env.example .devcontainer/.env
-$EDITOR .devcontainer/.env          # set ANTHROPIC_API_KEY
+# 1. Store the Anthropic credential in the macOS Keychain (one-time; never
+#    committed, never baked in, never written into the worktree).
+#    Pro/Max subscription:  claude setup-token   # 1-year OAuth token (browser, once)
+security add-generic-password -a "$USER" -s claude-code-oauth-token -w '<token>'
+#    (pay-as-you-go alternative: export ANTHROPIC_API_KEY in your shell instead)
 
-# 2a. Open in VS Code / Cursor: "Dev Containers: Reopen in Container".
-#     postCreate installs harness deps and runs the egress self-check.
-
-# 2b. Or bring it up by hand and prove the boundary:
-docker compose -f .devcontainer/docker-compose.yml up -d --build
+# 2. Bring it up and prove the boundary. The script pulls the credential from
+#    the Keychain and passes it through the shell env — compose has no env_file.
+scripts/devcontainer-up.sh --build
 docker compose -f .devcontainer/docker-compose.yml exec coder \
   bash scripts/egress-selfcheck.sh
 ```
+
+VS Code / Cursor "Reopen in Container" also works, but the credential must be
+in the environment of the process that runs compose — launch the editor from a
+shell where it is exported, or boot with `scripts/devcontainer-up.sh` first and
+then attach.
 
 Expected self-check result: `example.com` **blocked**, `api.anthropic.com`
 **reachable**, direct (no-proxy) egress has **no route** → `egress-selfcheck: OK`.
@@ -119,8 +124,11 @@ at an explicit **human approval gate** before a **publish stub**. Configure with
 - **Multi-repo** orchestration.
 - **TLS-terminating / L7 hardening** (path/method/body filtering would need
   SSL-bump + a CA, deliberately avoided in Phase 0).
-- **A real secrets store.** `.env` is fine for local dev only; values are visible
-  via `docker inspect`.
+- **Hiding the credential from the container runtime.** At rest it lives only in
+  the macOS Keychain (no plaintext in the worktree), but the running container's
+  env is still visible via `docker inspect` — unavoidable while the coder itself
+  calls the API. Containment is the egress allowlist: with `api.anthropic.com` as
+  the only route out, a prompt-injected coder has nowhere to exfiltrate it.
 - **Prevent an allowlisted host from being abused** (e.g. a malicious npm
   package). Phase 0 gates *where* traffic can go, not *what* trusted hosts serve.
 

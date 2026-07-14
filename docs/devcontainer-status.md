@@ -1,10 +1,13 @@
 # Dev Container orchestrator — build status & roadmap
 
 Companion to the design in [../devcontainer-orchestrator-architecture.md](../../devcontainer-orchestrator-architecture.md).
-This tracks what is **built + statically validated** vs what remains, and the one
-caveat that matters: **nothing here has been booted live yet** — it was authored
-and adversarially reviewed on a host without the `docker compose` v2 plugin, so
-every claim below is from `tsc`/syntax/adversarial-review, not a running system.
+This tracks what is **built + statically validated** vs what remains.
+**Live-boot status (2026-07-14): Phases 0 and 1 have now run live** — the stack
+boots, the egress self-check passes all 6 assertions from inside the coder, and
+the Phase 1 pipeline completed a full cycle (plan → human approve → implement →
+independent review approve → test-gate green → publish gate) on a demo repo,
+authenticated with a subscription OAuth token injected from the macOS Keychain.
+Phases 2–3 remain statically validated only.
 
 ## Built & validated (Phase 0–3)
 
@@ -15,7 +18,9 @@ every claim below is from `tsc`/syntax/adversarial-review, not a running system.
 | **2** | Out-of-container publish broker (`broker/`) over a unix socket: renders ground truth from a freshly-fetched ref, human approves at the broker by typing the sha, pushes the approved sha to a broker-constructed allowlist-validated URL. Coder holds no token/egress | `tsc` green; trust-model redesign cleared 4 blocking security findings + 3 re-verify blockers |
 | **3** | Multi-repo driver (`harness/src/multi/`): callable `runOrchestrator` per repo, `clone --reference --dissociate` isolated worktrees (cone sparse for knowledge repos), cross-repo combined gates, resumable ticket state; origins mounted read-only | `tsc` green; security lens "ship"; sparse empty-tree blocker fixed |
 
-Key security properties (by construction, verified by design review — not yet live):
+Key security properties (by construction, verified by design review; the
+network-boundary and no-credential assertions are now also live-verified by the
+Phase 0 self-check):
 - The C-3 escape is gone: the boundary is the Linux network namespace, so an
   in-shell `$(...)` has nowhere to escape to.
 - The coder never holds a push token or GitHub egress; publishing is a typed,
@@ -23,19 +28,25 @@ Key security properties (by construction, verified by design review — not yet 
 - Read-only judge steps are genuinely read-only; the test gate's pass/fail is an
   observed exit code, never a model claim.
 
-## Next: boot it live (required before Phase 4/5)
+## Live-boot roadmap (required before Phase 4/5)
 
-On a host with Docker Desktop + the Compose v2 plugin:
-1. Phase 0: `docker compose -f .devcontainer/docker-compose.yml up -d --build` then
-   the egress self-check (see [devcontainer-phase0.md](devcontainer-phase0.md)).
-2. Phase 1: run the harness on a single repo end-to-end.
+1. ~~Phase 0: boot the stack + egress self-check~~ **DONE 2026-07-14** —
+   `scripts/devcontainer-up.sh` (Keychain-injected auth), self-check 6/6 PASS.
+2. ~~Phase 1: run the harness on a single repo end-to-end~~ **DONE 2026-07-14** —
+   full cycle on a demo repo; publish gate declined by design (no broker in the loop).
 3. Phase 2: `export BROKER_GITHUB_TOKEN=…`, edit `config/broker-policy.json`, and
    drive one publish through the broker (see [devcontainer-phase2.md](devcontainer-phase2.md)).
 4. Phase 3: run one multi-repo ticket (see [devcontainer-phase3.md](devcontainer-phase3.md)).
 
-Expect first-boot friction (image builds, `npm ci` re-installing Linux binaries,
-socket volume perms, model-id/API specifics) — that is exactly what a live boot
-surfaces and static checks cannot.
+First-boot friction found and fixed (exactly the class of issue static checks
+cannot surface):
+- Bind-mounted `harness/node_modules` carried macOS (darwin-arm64) esbuild
+  binaries into the Linux container — fixed by running `.devcontainer/postCreate.sh`
+  (in-container `npm ci`) when attaching via `docker compose exec` instead of the
+  VS Code devcontainer flow.
+- Zod v4's `z.toJSONSchema()` stamps the draft 2020-12 meta-schema ref, which the
+  bundled Claude Code CLI's ajv (draft-07) cannot resolve — fixed with
+  `target: "draft-7"` in `harness/src/sdk.ts`.
 
 ## Phase 4 — egress hardening (designed, NOT built)
 

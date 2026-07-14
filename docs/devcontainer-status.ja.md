@@ -1,10 +1,12 @@
 # Dev Container オーケストレータ — ビルド状況とロードマップ
 
 [../devcontainer-orchestrator-architecture.md](../../devcontainer-orchestrator-architecture.md) の設計に対応する文書。
-ここでは**ビルド済み + 静的に検証済み**なものと残りを追跡し、重要な但し書きを1つ挙げる:
-**ここに書かれたものはまだ一度も live boot されていない** — `docker compose` v2 プラグインが
-無いホスト上で執筆・敵対的レビューされたため、以下のすべての主張は稼働中のシステムではなく
-`tsc`/構文/敵対的レビューによるものである。
+ここでは**ビルド済み + 静的に検証済み**なものと残りを追跡する。
+**live boot 状況(2026-07-14): Phase 0 と 1 は実機で稼働済み** — スタックが boot し、
+egress セルフチェックは coder 内から全6項目 PASS、Phase 1 パイプラインはデモリポジトリで
+1周を完走した(plan → 人間の承認 → implement → 独立レビューの承認 → test-gate green →
+publish ゲート)。認証は macOS Keychain から注入したサブスクリプションの OAuth トークン。
+Phase 2–3 は静的検証のみのまま。
 
 > 🇬🇧 English: [devcontainer-status.md](devcontainer-status.md)
 
@@ -17,7 +19,8 @@
 | **2** | unix ソケット越しのコンテナ外 publish broker(`broker/`): 直前に fetch した ref から ground truth を再描画し、人間が broker 側で sha をタイプして承認、承認された sha を broker が構築した allowlist 検証済み URL へ push する。coder はトークンも egress も持たない | `tsc` green。トラストモデルの再設計で4件のブロッキングなセキュリティ指摘 + 3件の再検証ブロッカーを解消 |
 | **3** | マルチリポジトリドライバ(`harness/src/multi/`): リポジトリごとに呼び出せる `runOrchestrator`、`clone --reference --dissociate` による隔離 worktree(知識リポジトリは cone sparse)、リポジトリ横断の統合ゲート、再開可能なチケット状態。origin は読み取り専用マウント | `tsc` green。セキュリティ観点「ship」。sparse の空ツリーのブロッカーを修正 |
 
-主要なセキュリティ特性(構成による。設計レビューで検証済み — まだ live ではない):
+主要なセキュリティ特性(構成による。設計レビューで検証済み。ネットワーク境界と
+credential 不在のアサーションは Phase 0 セルフチェックで live 検証も済み):
 - C-3 のエスケープは消えた: 境界が Linux のネットワーク名前空間なので、in-shell の
   `$(...)` にはエスケープ先が無い。
 - coder は push トークンも GitHub egress も決して持たない。publish はトラスト側での、
@@ -25,19 +28,23 @@
 - 読み取り専用のジャッジステップは本当に読み取り専用。test gate の pass/fail は観測された
   終了コードであって、モデルの主張では決してない。
 
-## 次: live boot する(Phase 4/5 の前に必須)
+## live boot ロードマップ(Phase 4/5 の前に必須)
 
-Docker Desktop + Compose v2 プラグインのあるホスト上で:
-1. Phase 0: `docker compose -f .devcontainer/docker-compose.yml up -d --build` の後、
-   egress セルフチェック([devcontainer-phase0.md](devcontainer-phase0.md) 参照)。
-2. Phase 1: 単一リポジトリで harness をエンドツーエンドで走らせる。
+1. ~~Phase 0: スタックを boot + egress セルフチェック~~ **完了 2026-07-14** —
+   `scripts/devcontainer-up.sh`(Keychain 注入の認証)、セルフチェック 6/6 PASS。
+2. ~~Phase 1: 単一リポジトリで harness をエンドツーエンドで走らせる~~ **完了 2026-07-14** —
+   デモリポジトリで1周完走。publish ゲートは設計通り拒否(broker はループ外)。
 3. Phase 2: `export BROKER_GITHUB_TOKEN=…`、`config/broker-policy.json` を編集し、
    broker 経由で publish を1回通す([devcontainer-phase2.md](devcontainer-phase2.md) 参照)。
 4. Phase 3: マルチリポジトリのチケットを1つ走らせる([devcontainer-phase3.md](devcontainer-phase3.md) 参照)。
 
-初回 boot の摩擦(image のビルド、`npm ci` が Linux バイナリを再インストール、ソケット
-ボリュームの権限、model-id/API の詳細)は予想される — それこそが live boot が表面化させ、
-静的チェックにはできないことである。
+実際に見つかり修正した初回 boot の摩擦(まさに静的チェックでは表面化しない類):
+- bind mount された `harness/node_modules` が macOS(darwin-arm64)の esbuild バイナリを
+  Linux コンテナに持ち込んだ — VS Code devcontainer フローではなく `docker compose exec`
+  でアタッチした場合は `.devcontainer/postCreate.sh`(コンテナ内 `npm ci`)の実行で解消。
+- Zod v4 の `z.toJSONSchema()` が draft 2020-12 のメタスキーマ参照を刻むが、同梱の
+  Claude Code CLI の ajv(draft-07)はそれを解決できない — `harness/src/sdk.ts` で
+  `target: "draft-7"` を指定して解消。
 
 ## Phase 4 — egress の堅牢化(設計済み・未ビルド)
 

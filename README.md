@@ -111,6 +111,21 @@ planning) and additional ticket-source adapters.
   exclusion, literal path match) but not edit (denyWrite). A pre-push hook
   restricts push destinations to `allowed_push_orgs`.
 
+## The containerized path
+
+Alongside the macOS/cmux workflow above, this repo also has a Linux
+devcontainer path (`harness/`, `broker/`, `reviewer/`, `.devcontainer/`) that
+replaces per-role macOS sandboxing with per-role containers: a **worker**
+(edits code, no broker socket — cannot even request a publish), an
+**orchestrator** (`:ro` workspace mount, runs a coded spine + an Agent SDK
+session on rails; `npm run chat` is the interactive entry point), a
+**broker** (the only token holder — human-gated, ground-truth-rendered
+publish), and an **advisory reviewer** (own container, LLM-free broker, one
+optional typed verdict at the publish gate). Phases 0–3 and M1–M3 have all run
+live — see [`docs/agent-orchestration.md`](docs/agent-orchestration.md) and
+[`docs/devcontainer-status.md`](docs/devcontainer-status.md) for the design
+and build record.
+
 Full details: [`docs/architecture.md`](docs/architecture.md),
 [`docs/handoff-protocol.md`](docs/handoff-protocol.md),
 [`docs/settings-reference/`](docs/settings-reference/),

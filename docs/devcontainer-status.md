@@ -110,6 +110,28 @@ Phase 0 self-check):
    the title/diff mismatch, and explicitly disregarded the injected
    instruction in the untrusted-labeled body.
 
+8. ~~M4: finalize~~ **DONE 2026-07-15**. Test coverage for M1–M3's new
+   surfaces: `harness/test/workerd-protocol.test.ts` (the orchestrator↔worker
+   wire schema), `harness/test/gitops.test.ts` (`commitRangeDiff` /
+   `commitAll` fixtures), and `harness/test/driver-resume.test.ts`
+   (`resolveResumedInstruction`, the Phase 3 resume fix above), alongside
+   M2's `harness/test/ledger.test.ts` + `harness/test/actions.test.ts` — five
+   suites, `npm test` (`harness/`) 56/56 green; `npm run typecheck` clean.
+   `tests/run-tests.sh` (the pre-existing shell-side suite for
+   `scripts/lib/`) now also GUARDS AND RUNS the harness suite as its last
+   check: it probes whether the *this host's* `harness/node_modules` is
+   actually executable (`tsx --version` is not enough — a
+   platform-mismatched esbuild binary, the same darwin/linux mismatch class
+   recorded in the M1 friction notes below, prints a version and exits 0
+   without ever invoking the native transform; a real `tsx -e` transform is
+   what the guard checks), and only then `cd harness && npm test`s and folds
+   the result into the shell suite's pass/fail count (skips with a message,
+   never fails the run, when the harness copy isn't runnable on this host).
+   `tests/run-tests.sh` is 40/40 green with the harness suite folded in. This
+   docs pass (this file plus agent-orchestration.md, architecture.md,
+   agent-roles.md, egress-selfcheck-per-role.md, and the READMEs) is the M4
+   finalization itself.
+
 M1 first-boot friction found and fixed (all live, none static):
 - A named volume layered over the `:ro` harness bind initializes from the
   HOST's `node_modules` (darwin binaries, host-uid ownership) → `npm ci`
@@ -141,10 +163,16 @@ cannot surface):
   binaries into the Linux container — fixed by running `.devcontainer/postCreate.sh`
   (in-container `npm ci`) when attaching via `docker compose exec` instead of the
   VS Code devcontainer flow.
-- Known cosmetic issue (open): the REVIEW step's structured summary occasionally
-  carries trailing model-output tag fragments (`</summary>`, `</invoke>`), which
-  flow verbatim into the broker-rendered PR body. Harmless but ugly — the harness
-  should sanitize/strip the structured review text before it reaches publish.
+- Known cosmetic issue (FIXED at the display layer, M4): the REVIEW step's
+  structured summary occasionally carries trailing model-output tag fragments
+  (`</summary>`, `</invoke>`), which used to flow verbatim into rendered
+  text. `broker/src/approve.ts`'s `foldNotes()` now strips these fragments
+  from the M3 reviewer verdict line shown at the broker's approval header
+  (`renderHeader`). The **root cause is still open**: the harness's own PR
+  body (`harness/src/publish.ts`'s `buildBody()`, which embeds the REVIEW
+  step's `review.summary` verbatim) is a separate code path and is not
+  sanitized — the structured review text itself should still be
+  cleaned/stripped at the source before it reaches either consumer.
 - Phase 3 finding (open): per-repo plan scoping is **prompt-level only**. The
   driver hands every repo's planner the full ticket instruction; on the first
   DEMO-1 run one planner planned edits in the *sibling* repo (worktrees share
@@ -153,11 +181,16 @@ cannot surface):
   that says "change ONLY the repo in your working directory" fixes it — but a
   structural fix (per-repo worktree isolation via mounts, or the read-only judge
   container) is the durable answer.
-- Phase 3 finding (open): on resume, the driver keeps the **stored** instruction
-  and ignores the newly-given one even when *nothing* has been published yet
-  (the consistency guard is only needed once a repo has shipped). Workaround:
-  delete `tasks/<ticket>/` to start fresh. Consider allowing an instruction
-  update while `published` is empty.
+- Phase 3 finding (FIXED, M4): on resume, the driver used to keep the
+  **stored** instruction and ignore the newly-given one even when *nothing*
+  had been published yet (the consistency guard is only needed once a repo
+  has shipped). `harness/src/multi/driver.ts`'s `resolveResumedInstruction()`
+  (pure, unit-tested in `harness/test/driver-resume.test.ts`) now ADOPTS a
+  newly-given instruction on resume exactly when it differs from the stored
+  one AND no repo in the ticket has outcome `published` yet; once any repo
+  has shipped, the stored instruction still sticks (unchanged behavior) and
+  the driver only warns. `rm -rf tasks/<ticket>` is no longer required to
+  correct an instruction before anything has published.
 - Zod v4's `z.toJSONSchema()` stamps the draft 2020-12 meta-schema ref, which the
   bundled Claude Code CLI's ajv (draft-07) cannot resolve — fixed with
   `target: "draft-7"` in `harness/src/sdk.ts`.

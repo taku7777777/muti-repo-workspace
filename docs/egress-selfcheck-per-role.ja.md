@@ -1,6 +1,21 @@
 # 役割別 egress セルフチェック(設計メモ)
 
-**ステータス: 設計のみ・未実装。** [agent-roles.md](agent-roles.md) の姉妹編。
+**ステータス: 以下の一般的な役割別マニフェスト設計そのものは設計のみ・未実装** —
+だが、その設計が見越していた worker/orchestrator の分離は現実のものになった。
+[agent-orchestration.md](agent-orchestration.md) / M1
+([devcontainer-status.md](devcontainer-status.md) の項目5)を参照。`worker` と
+`orchestrator` の両コンテナは、それぞれ自分の役割セルフチェック
+(`scripts/egress-selfcheck-role.sh`、`ROLE=worker|orchestrator`)を、両ケージの
+Phase 0 ベース `egress-selfcheck.sh` の上に重ねて実行する — この M1 分離が依存する
+マウント/ソケット境界を表明する(worker: broker ソケットなし、`repositories/`/
+`harness/` へ書き込めない。orchestrator: ワークスペースマウント全体が `:ro`、
+broker ソケットと worker-RPC ソケットの両方を保持)。M3 の broker 側 reviewer
+コンテナは現時点では専用の絞り込まれた allowlist ではなく**coder の allowlist を
+共有している**(同じ `caged` ネットワーク、同じ egress-proxy、同じ
+`api.anthropic.com` + npm レジストリの allowlist)。reviewer 専用の
+`docker/egress/roles/reviewer.allow` 的な allowlist(および本メモが設計する
+役割別マニフェストの一般化)は、本ドキュメントの Phase-4 スコープのまま未実装で
+残っている。[agent-roles.md](agent-roles.md) の姉妹編。
 現在 `scripts/egress-selfcheck.sh` は境界を*1つ*だけ証明している — caged な coder
 (allowlist 以外には何も到達不可、proxy をバイパスする経路無し、DNS 無し、docker
 socket 無し、push クレデンシャル無し)。役割が別々の egress を持つようになれば

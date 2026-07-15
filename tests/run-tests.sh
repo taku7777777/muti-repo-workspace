@@ -152,6 +152,31 @@ git -C "$wt_origin" worktree remove --force \
   "$ROOT/tasks/$wt_ticket/repositories/fixture-repo" >/dev/null 2>&1
 rm -rf "$ROOT/tasks/$wt_ticket" "$wt_origin"
 
+# --- harness/test/*.test.ts (guarded: node:test suite, run ONLY if this ------
+# host's harness/node_modules is actually runnable) --------------------------
+# harness/node_modules is gitignored and populated by whichever environment last
+# ran `npm ci` there — on a dev machine that's often the orchestrator CONTAINER
+# (Linux), whose native esbuild binary (tsx's transform engine) silently fails
+# every transform on a macOS/host node. `tsx --version` alone does NOT catch
+# this: it prints and exits 0 without ever invoking esbuild's native binary
+# (confirmed empirically while writing this guard). A trivial `tsx -e` DOES
+# force one real transform, so it actually detects the mismatch — that's the
+# check used here, not a bare `--version`.
+HARNESS_DIR="$ROOT/harness"
+HARNESS_TSX="$HARNESS_DIR/node_modules/.bin/tsx"
+if [ -x "$HARNESS_TSX" ] \
+  && "$HARNESS_TSX" --version >/dev/null 2>&1 \
+  && "$HARNESS_TSX" -e 'process.exit(0)' >/dev/null 2>&1; then
+  if (cd "$HARNESS_DIR" && npm test); then
+    PASS=$((PASS + 1))
+  else
+    FAIL=$((FAIL + 1))
+    printf 'FAIL: %s\n' "harness npm test (see output above)" >&2
+  fi
+else
+  echo "skipped: harness node_modules not runnable on this host; run npm test in the orchestrator container"
+fi
+
 echo ""
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

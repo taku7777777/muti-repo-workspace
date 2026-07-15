@@ -2,13 +2,15 @@
 
 [../devcontainer-orchestrator-architecture.md](../../devcontainer-orchestrator-architecture.md) の設計に対応する文書。
 ここでは**ビルド済み + 静的に検証済み**なものと残りを追跡する。
-**live boot 状況(2026-07-15): Phase 0–2 は実機で稼働済み。** スタックが boot し、
+**live boot 状況(2026-07-15): 全フェーズ(0–3)が実機で稼働済み。** スタックが boot し、
 egress セルフチェックは coder 内から全6項目 PASS、Phase 1 パイプラインはデモリポジトリで
 1周を完走(認証は macOS Keychain から注入したサブスクリプションの OAuth トークン)、
-そして Phase 2 broker が実際の publish を1回実行した: ソケット越しの型付き intent →
-ground truth の描画 → 人間が broker 側で sha をタイプ → 承認した sha そのものを push →
-`gh pr create`(taku7777777/phase2-demo#1)。実行後も coder の egress セルフチェックは
-PASS のまま。Phase 3 は静的検証のみのまま。
+Phase 2 broker は実際の publish を実行(型付き intent → ground truth の描画 → broker 側で
+sha をタイプ → 承認した sha そのものを push → `gh pr create`、taku7777777/phase2-demo#1)、
+そして Phase 3 driver は2リポジトリのチケット(DEMO-1)をエンドツーエンドで駆動した:
+ローカル `--reference` worktree、combined plan gate 1回、リポジトリごとの逐次パイプライン、
+broker ゲート付き publish 2回が承認 sha ちょうどに着地(phase2-demo#2、phase3-docs#1)、
+正直な台帳と再開可能な state。どの publish の後も egress セルフチェックは PASS のまま。
 
 > 🇬🇧 English: [devcontainer-status.md](devcontainer-status.md)
 
@@ -41,7 +43,11 @@ credential 不在のアサーションは Phase 0 セルフチェックで live 
    `allowed_push_orgs=[taku7777777]` で焼き込み。`BROKER_WORKTREES_DIR` は
    `tasks/<T>/repositories` を指す(`repositories/` 配下は coder にとって `:ro` のため)。
    リモートの ref は承認した sha ちょうどに着地。
-4. Phase 3: マルチリポジトリのチケットを1つ走らせる([devcontainer-phase3.md](devcontainer-phase3.md) 参照)。
+4. ~~Phase 3: マルチリポジトリのチケットを1つ走らせる~~ **完了 2026-07-15** —
+   チケット DEMO-1 を phase2-demo(code) + phase3-docs(docs)で実行。初回は各リポジトリの
+   plan が兄弟リポジトリへ越境スコープしたのを combined plan gate で人間が却下(下記
+   所見参照)、スコープを明示した再実行で両リポジトリを broker 経由で publish、リモートの
+   ref は承認 sha と完全一致。
 5. 最初の役割分割の増分(3–4 の後): **読み取り専用ジャッジコンテナ**(ソース `:ro`、
    egress は anthropic のみ)で PLAN と REVIEW を走らせる — レビューの独立性を
    アプリ層のツール制御から OS 境界に格上げする。
@@ -58,6 +64,17 @@ credential 不在のアサーションは Phase 0 セルフチェックで live 
   タグ片(`</summary>`、`</invoke>`)が混ざることがあり、broker が描画する PR body に
   そのまま流れる。無害だが見苦しい — harness が publish に渡す前に構造化レビュー文を
   サニタイズすべき。
+- Phase 3 の所見(未対応): リポジトリごとの plan スコープは**プロンプト頼み**。driver は
+  全リポジトリの planner にチケット指示文全文を渡すため、DEMO-1 の初回実行では一方の
+  planner が*兄弟*リポジトリの編集を計画した(worktree 群は `tasks/<T>/repositories/` を
+  共有しており、越境編集はそのリポジトリ自身の diff/review には映らない)。combined plan
+  gate が捕捉し、「現在の作業ディレクトリのリポジトリだけを変更せよ」という指示文で解決
+  したが、恒久策は構造的な分離(マウントによる worktree 隔離、または読み取り専用ジャッジ
+  コンテナ)である。
+- Phase 3 の所見(未対応): 再開時、driver は**保存済み**の指示文を維持し、新しく与えられた
+  ものを無視する — まだ*何も* publish されていない場合でも(整合性ガードが必要なのは
+  1つでも publish 済みになってからのはず)。回避策: `tasks/<ticket>/` を削除して最初から。
+  `published` が空の間は指示文の更新を許すことを検討すべき。
 
 ## Phase 4 — egress の堅牢化(設計済み・未ビルド)
 

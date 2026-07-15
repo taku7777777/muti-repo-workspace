@@ -50,7 +50,10 @@ Code セッション**を実行するための、Git リポジトリの形をし
 
 - macOS(サンドボックスは Claude Code の macOS サンドボックスを使用。`--no-sandbox` モードは他 OS でも動作)
 - `git`, `jq`, `curl`, [GitHub CLI `gh`](https://cli.github.com/)、対象リポジトリへの SSH アクセス
-- [Claude Code](https://claude.com/claude-code)
+- [Claude Code](https://claude.com/claude-code) **≥ 2.1.149** — worker の
+  サンドボックスは origin の `.git` への書込権限を一切与えず、worktree の
+  commit はこのバージョン以降で検証済みの挙動に依存します
+  (sandbox-experiments S8-d)
 - [`cmux`](https://github.com/wandb/cmux) — 任意だが強く推奨
   (無い場合はクリップボードにフォールバックする単一セッションモードになります)
 

@@ -55,6 +55,19 @@ case "$ACTION" in
     [ -n "$VALUE" ] || die "--add-allow needs a rule"
     apply '.permissions.allow = ((.permissions.allow // []) + [$v] | unique)' --arg v "$VALUE"
     info "added allow rule: $VALUE"
+    case "$VALUE" in
+      Edit\(*|Write\(*)
+        # Verified (sandbox-experiments S2-h/n): Edit/Write allow rules merge
+        # into the sandbox's OS write boundary — regardless of which settings
+        # file they live in — so this opens BASH writes to that path too, not
+        # just the Edit/Write tools. Paths pinned in sandbox.filesystem.denyWrite
+        # stay protected (deny always wins).
+        warn "Edit/Write allow rules widen the OS-level sandbox write boundary as"
+        warn "well (bash writes to the matched paths, not just the Edit tool)."
+        warn "denyWrite-pinned paths remain protected; everything else in the"
+        warn "rule's scope is now writable without any prompt."
+        ;;
+    esac
     ;;
   --add-ask)
     [ -n "$VALUE" ] || die "--add-ask needs a rule"

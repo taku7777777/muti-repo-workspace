@@ -5,7 +5,7 @@
     "OTEL_RESOURCE_ATTRIBUTES": "workspace={{TICKET_ID}},purpose={{PURPOSE}}"
   },
 
-  "_security_note": "WARNING: without the OS sandbox, allowlisted shell tools can read files the Read-tool deny rules below block (e.g. `cat ~/.ssh/id_rsa`), and `find -exec` / `git difftool -x` would run arbitrary commands — so the allow list below deliberately excludes those escape hatches. No-sandbox mode gives tool-level guards only; it CANNOT fully protect secrets from shell reads. Use it only where the host is already trusted.",
+  "_security_note": "WARNING: without the OS sandbox, allowlisted shell tools can read files the Read-tool deny rules below block (e.g. `cat ~/.ssh/id_rsa`), and `find -exec` / `git difftool -x` would run arbitrary commands — so the allow list below deliberately excludes those escape hatches. Also note the `deny: [Edit(...)]` rules only bind the Edit TOOL: a Bash redirect (`cat evil > <workspace>/.githooks/pre-push`, `> repositories/<r>/.git/config`, `> tasks/<T>/scripts/push-create-pr.sh`) is NOT stopped by them, so with the sandbox off the push boundary and the privileged-script integrity are NOT enforced — a compromised worker can disable the pre-push hook or repoint a remote. No-sandbox mode gives tool-level guards only; it CANNOT fully protect secrets from shell reads or control files from shell writes. Use it only where the host is already trusted.",
 
   "permissions": {
     "defaultMode": "acceptEdits",
@@ -45,8 +45,7 @@
       "Edit(~/.claude.json)"
     ],
     "additionalDirectories": [
-      "{{TASK_DIR}}",
-      "{{WORKSPACE_ROOT}}/repositories"
+      "{{TASK_DIR}}"
     ]
   },
 

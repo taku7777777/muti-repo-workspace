@@ -7,7 +7,10 @@ LINES=60
 SCROLLBACK=false
 while [ $# -gt 0 ]; do
   case "$1" in
-    --lines) LINES="${2:?--lines needs a value}"; shift 2 ;;
+    --lines)
+      LINES="${2:?--lines needs a value}"
+      case "$LINES" in ''|*[!0-9]*) echo "ERROR: --lines must be a positive integer" >&2; exit 2 ;; esac
+      shift 2 ;;
     --scrollback) SCROLLBACK=true; shift ;;
     --workspace*|--surface*)
       echo "ERROR: target override is not allowed" >&2; exit 2 ;;

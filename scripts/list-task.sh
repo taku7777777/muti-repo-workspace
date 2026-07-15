@@ -15,12 +15,22 @@ for task in "$TASKS_DIR"/*/; do
   found=true
   ticket="$(basename "$task")"
 
+  # Per-task parsing failures (corrupt/half-written meta) must not abort the
+  # whole listing under set -e/pipefail — swallow jq errors and fall back to
+  # "-" so every task still gets its line.
   purpose="-"
-  settings="$task/agents/worker/.claude/settings.json"
-  if [ -f "$settings" ]; then
-    purpose="$(jq -r '.env.OTEL_RESOURCE_ATTRIBUTES // ""' "$settings" \
-      | sed -n 's/.*purpose=\([^,]*\).*/\1/p')"
+  if [ -f "$task/.task-meta.json" ]; then
+    # Permanent metadata written by /open-task finalize (review Low-8).
+    purpose="$(jq -r 'if (.purpose // "") == "" then "-" else .purpose end' "$task/.task-meta.json" 2>/dev/null || true)"
     [ -n "$purpose" ] || purpose="-"
+  else
+    # Legacy fallback (pre-.task-meta.json tasks): scrape the OTEL env var.
+    settings="$task/agents/worker/.claude/settings.json"
+    if [ -f "$settings" ]; then
+      purpose="$(jq -r '.env.OTEL_RESOURCE_ATTRIBUTES // ""' "$settings" 2>/dev/null \
+        | sed -n 's/.*purpose=\([^,]*\).*/\1/p' || true)"
+      [ -n "$purpose" ] || purpose="-"
+    fi
   fi
 
   repos=""

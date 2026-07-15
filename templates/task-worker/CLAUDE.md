@@ -28,6 +28,11 @@ These are blocked at the OS level. If a command fails with
 `Operation not permitted`, do **not** retry or work around it — write a
 handoff request with `status: blocked` and go idle.
 
+One command shape falls to a permission prompt nobody is watching: a shell
+glob expanded into a variable that is then used for file access
+(`for f in *.ts; do cat "$f"; done`). Avoid that shape — use explicit paths,
+`find ... -exec`, or the Read tool instead; everything else runs unprompted.
+
 ## Handoff protocol — report, then stay idle. NEVER exit.
 
 Work through `../../docs/task.md` step by step. On each step completion, when

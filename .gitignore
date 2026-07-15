@@ -20,8 +20,26 @@
 /.gitconfig-workspace
 
 # --- Local overrides ---
-config/workspace.local.json
+# NB: deliberately NO config/workspace.local.json entry — no script reads such
+# a file, and ignoring it would invite users to put allowed_push_orgs there
+# and silently get unrestricted pushes (review Low-14).
 .claude/settings.local.json
+
+# --- Phase 0 dev container ---
+# Runtime secret (ANTHROPIC_API_KEY) — injected at runtime, never committed.
+# .env.example IS committed; the real .env is not.
+.env
+/.devcontainer/.env
+# Harness build/runtime artifacts.
+/harness/node_modules/
+/harness/dist/
+
+# --- Phase 2 publish broker ---
+# Broker build/runtime artifacts and the runtime socket directory (created at
+# `npm --prefix broker start`; bind-mounted into the coder read/write).
+/broker/node_modules/
+/broker/dist/
+/.devcontainer/run-broker/
 
 # --- OS noise ---
 .DS_Store

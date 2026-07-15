@@ -1,0 +1,207 @@
+# Phase 0 boundary — a "caged" coder + an egress gateway sidecar.
+#
+# EGRESS VARIANT: Approach A — an EXPLICIT Squid forward-proxy sidecar, with the
+# coder confined to an `internal: true` network. This was judged the most robust
+# option in the architecture review, for reasons worth stating at the boundary:
+#
+#   * ZERO NET_ADMIN anywhere in the compose (User Decision 2). The coder drops
+#     ALL caps; Squid is an ordinary userspace listener. There is no in-workload
+#     firewall to self-escalate against.
+#   * Domain-level allowlisting over the cleartext CONNECT host — NO TLS
+#     termination, NO SSL-bump, NO CA installed in the coder. (A transparent
+#     gateway would only see the TLS SNI, which TLS 1.3 ECH can hide.)
+#   * FAIL-CLOSED BY TOPOLOGY: the coder is attached ONLY to `caged`
+#     (internal: true) which Docker creates with no route to the host/internet.
+#     A tool that ignores HTTP(S)_PROXY has nowhere to send its packets — it
+#     breaks, nothing escapes. Honoring the proxy is a usability property here,
+#     not the security property.
+#   * The coder needs no external DNS at all (the proxy resolves names), which
+#     closes the DNS-tunnel exfil vector (anthropics/claude-code#36907) by
+#     construction.
+#
+# The transparent NET_ADMIN gateway (Approach B) is deliberately NOT built here;
+# it is the documented fallback only if a future tool cannot honor an explicit
+# proxy (see docs/devcontainer-phase0.md).
+
+name: mrw-phase0
+
+services:
+  # --------------------------------------------------------------------------
+  # coder: the SDK harness workload. No caps, no docker.sock, no host secrets.
+  # Reaches the internet ONLY through egress-proxy, and only for allowlisted
+  # domains. Attached to `caged` (internal) ONLY — this single fact is the
+  # containment boundary; do not add a second network here.
+  # --------------------------------------------------------------------------
+  coder:
+    build:
+      context: ..
+      dockerfile: .devcontainer/coder.Dockerfile
+    user: node
+    working_dir: /workspaces/muti-repo-workspace
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - caged
+    environment:
+      # Usability: point every proxy-aware tool at the gateway. Both cases,
+      # because Unix tools read them inconsistently.
+      HTTP_PROXY: http://egress-proxy:3128
+      HTTPS_PROXY: http://egress-proxy:3128
+      http_proxy: http://egress-proxy:3128
+      https_proxy: http://egress-proxy:3128
+      # Never proxy loopback or the proxy's own service name.
+      NO_PROXY: localhost,127.0.0.1,::1,egress-proxy
+      no_proxy: localhost,127.0.0.1,::1,egress-proxy
+      # Keep a locked build from phoning home to a not-yet-allowlisted host.
+      DISABLE_AUTOUPDATER: "1"
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+      # Phase 2 publish broker: the ONLY publish path. The coder connects to this
+      # unix socket (shared via the `broker-sock` NAMED VOLUME, not a host bind —
+      # a host-path-bound unix socket does NOT traverse the container boundary on
+      # Docker Desktop for macOS) and sends a TYPED intent. It still holds NO token
+      # and NO github egress. Unset this to fall back to the Phase-1 publish stub.
+      # The broker runs in its OWN container (`broker` service below), on `egress`.
+      BROKER_SOCKET: /run/broker/publish.sock
+      # Anthropic auth — passed through from the HOST SHELL at `docker compose up`
+      # time (see scripts/devcontainer-up.sh, which reads the macOS Keychain).
+      # No env_file: the secret never exists as plaintext inside the worktree.
+      # Null-value passthrough — a variable unset on the host is OMITTED from the
+      # container env entirely (an empty string could shadow the other credential).
+      # Set exactly one: CLAUDE_CODE_OAUTH_TOKEN (Pro/Max subscription, minted
+      # with `claude setup-token`) or ANTHROPIC_API_KEY (pay-as-you-go).
+      CLAUDE_CODE_OAUTH_TOKEN:
+      ANTHROPIC_API_KEY:
+    volumes:
+      # Repo bind mount is declared HERE (compose), not via workspaceMount.
+      - ..:/workspaces/muti-repo-workspace:cached
+      # Origins are the clone --reference SOURCE (Phase 3) and must never be
+      # coder-writable — mount them READ-ONLY over the RW parent. This shrinks the
+      # in-container blast radius: a prompt-injected coder cannot corrupt the shared
+      # origin clones that every ticket's worktrees derive from.
+      - ../repositories:/workspaces/muti-repo-workspace/repositories:ro
+      # Phase 2: the broker's socket lives in a Docker NAMED VOLUME shared with the
+      # `broker` service. A named volume (unlike a host-path bind of a unix socket)
+      # DOES traverse the container boundary on Docker Desktop for macOS. This is
+      # the coder's ONLY new surface: it holds NO token and gains NO github egress,
+      # and the broker only ever accepts the typed request, re-validated + human-
+      # gated, so it is not a new escape hatch.
+      - broker-sock:/run/broker
+    depends_on:
+      egress-proxy:
+        condition: service_healthy
+      broker:
+        condition: service_healthy
+    # Keep the container alive for the dev container / harness to attach to.
+    command: ["sleep", "infinity"]
+
+  # --------------------------------------------------------------------------
+  # broker: the Phase 2 publish broker — the ONLY component that can push. Its
+  # OWN container (trust split): it is on `egress` (github access) and holds the
+  # short-lived GitHub token in ITS env, NEVER the coder's. It reaches the coder
+  # only through the shared `broker-sock` named volume (the typed socket). It
+  # NEVER trusts the coder-writable worktree tree: policy comes from a
+  # broker-OWNED file baked into this image at BROKER_POLICY_FILE, git config is
+  # isolated, and every push goes to a broker-constructed, allowlist-validated URL
+  # from a broker-private scratch repo. The human approval gate is on THIS
+  # container's stdin — attach a terminal to answer it (see docs/devcontainer-phase2.md).
+  # --------------------------------------------------------------------------
+  broker:
+    build:
+      context: ..
+      dockerfile: .devcontainer/broker.Dockerfile
+    user: node
+    working_dir: /broker
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - egress
+    environment:
+      # Short-lived, repo-scoped push token — in the BROKER's env only, delivered
+      # by HOST-SHELL interpolation. Run `export BROKER_GITHUB_TOKEN=ghs_xxx` before
+      # `docker compose up`. DO NOT put it in .devcontainer/.env — that file is the
+      # coder's env_file, so a token there would leak into the caged coder (the one
+      # component that must hold NO token). The broker has NO env_file for exactly
+      # this reason.
+      BROKER_GITHUB_TOKEN: ${BROKER_GITHUB_TOKEN:-}
+      # TRUSTED policy, baked into the image (see broker.Dockerfile) — NOT read from
+      # the coder-writable /workspaces mount. Override at runtime only with a bind
+      # mount from a host path OUTSIDE the workspace.
+      BROKER_POLICY_FILE: /etc/mrw-broker/policy.json
+      # The coder-writable worktrees the broker reads objects from (mounted :ro).
+      # Point at tasks/<TICKET>/repositories for per-ticket work.
+      BROKER_WORKTREES_DIR: /workspaces/muti-repo-workspace/repositories
+      # The coder-writable tree the policy file must never live inside (F2 check).
+      BROKER_CODER_TREE: /workspaces/muti-repo-workspace
+      BROKER_SOCKET_PATH: /run/broker/publish.sock
+      GIT_TERMINAL_PROMPT: "0"
+    # NOTE: intentionally NO `env_file: .env` here — the broker must not load the
+    # coder's shared .env (which would also mean a token written there reaches the
+    # coder). The token arrives via the `environment` interpolation above.
+    volumes:
+      # The broker's TypeScript source, read-only (installed deps live in the image).
+      - ../broker/src:/broker/src:ro
+      # The shared socket named volume (also mounted in the coder).
+      - broker-sock:/run/broker
+      # The coder-writable worktrees — READ-ONLY. The broker reads objects by sha;
+      # it never writes here and never executes anything from here.
+      - ..:/workspaces/muti-repo-workspace:ro
+    # The human approval gate reads/writes this container's stdio. Attach with
+    # `docker compose attach broker` (or run it via `docker compose run`).
+    stdin_open: true
+    tty: true
+    # Ready = the unix socket is actually listening (not merely "process started"),
+    # so the coder's `depends_on: service_healthy` blocks until publish can connect,
+    # and a broker that dies (e.g. the EACCES socket-dir bug) is detected.
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/broker/publish.sock || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    command: ["npm", "start"]
+
+  # --------------------------------------------------------------------------
+  # egress-proxy: the ONLY path out. Dual-homed on `caged` (to receive the
+  # coder's requests) and `egress` (to reach the internet). Enforces the
+  # baked-in domain allowlist. Also drops ALL caps — an explicit proxy needs
+  # none. The coder cannot reconfigure it: separate container, no exec, no
+  # shared capability, config is read-only in the image.
+  # --------------------------------------------------------------------------
+  egress-proxy:
+    build:
+      context: ../docker/egress
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - caged
+      - egress
+    healthcheck:
+      # Readiness = squid process is up. (Phase 0 also re-proves reachability
+      # from the coder via scripts/egress-selfcheck.sh after start.)
+      test: ["CMD-SHELL", "pidof squid >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 4s
+
+networks:
+  # Internal: created with NO route to the host/internet. This is the
+  # fail-closed primitive. The coder sees only this network.
+  caged:
+    internal: true
+  # Normal bridge: the proxy AND the broker are attached, so both have egress.
+  # The coder is NOT here — it never gets github access.
+  egress:
+    driver: bridge
+
+volumes:
+  # Shared unix-socket carrier between the coder and the broker. A named volume
+  # crosses the container boundary on Docker Desktop for macOS where a host-path
+  # bind of a unix socket does not. Nothing else lives here.
+  broker-sock:

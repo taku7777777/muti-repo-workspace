@@ -1,0 +1,27 @@
+{
+  "name": "mrw-phase0-harness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 0 bespoke SDK orchestrator skeleton (no takt). Runs plan/implement as separate query() sessions, a harness-run test gate, and a human approval gate before a publish stub.",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "orchestrate": "tsx src/orchestrator.ts",
+    "drive": "tsx src/multi/driver.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'phase0 harness: no tests yet' && exit 0"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.205",
+    "@anthropic-ai/sdk": ">=0.93.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

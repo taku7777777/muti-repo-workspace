@@ -1,0 +1,22 @@
+{
+  "name": "mrw-publish-broker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 2 publish broker — the ONLY thing that can push. Runs OUTSIDE the coder container, holds the short-lived GitHub token, renders the ground-truth diff from git, gates on a human at the broker, and pushes + opens a PR reusing the workspace pre-push org/host allowlist (fail-closed).",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

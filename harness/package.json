@@ -10,6 +10,7 @@
   "scripts": {
     "orchestrate": "tsx src/orchestrator.ts",
     "drive": "tsx src/multi/driver.ts",
+    "workerd": "tsx src/workerd/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "echo 'phase0 harness: no tests yet' && exit 0"
   },

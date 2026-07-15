@@ -49,10 +49,40 @@ Phase 0 self-check):
    first attempt whose per-repo plans cross-scoped into the sibling repo (human
    declined; see findings below), the re-scoped run published both repos through
    the broker, and the remote refs match the approved shas exactly.
-5. First role-split increment (after 3–4): a **read-only judge container**
-   (source `:ro`, anthropic-only egress) running PLAN and REVIEW — upgrades
-   review independence from app-layer tool scoping to an OS boundary. See
-   [agent-roles.md](agent-roles.md) § Adoption order.
+5. ~~First role-split increment: the orchestrator/worker container split~~
+   **BUILT + LIVE-VALIDATED 2026-07-15** (M1 of
+   [agent-orchestration.md](agent-orchestration.md)). The coder cage is now two
+   cells: a **worker** (tasks/ rw only; harness/repositories `:ro`; **no broker
+   socket** — it cannot even request a publish) running a typed newline-JSON
+   RPC daemon (`harness/src/workerd/`, cloned from the broker socket pattern)
+   for setup/implement/fix/test steps, and an **orchestrator** (whole workspace
+   `:ro` at the mount level; holds the only broker socket + the worker RPC
+   socket; spine ledger on a private notes volume via `MRW_STATE_DIR`) running
+   the coded spine + read-only PLAN/REVIEW sessions. The worker daemon commits
+   deterministically after implement/fix (`mrw:`-prefixed messages), so the
+   review/publish diff is the read-only commit range `baseSha..HEAD` — computed
+   by the orchestrator, never claimed by the worker — and worktrees are always
+   clean for the broker. Single-container fallback kept (`WORKERD_SOCKET`
+   unset ⇒ in-process, same commit semantics). Live-validated: role self-checks
+   pass in both cages; a full driver cycle ran with plan/review on the `:ro`
+   mount, implement/tests over the RPC, and a stub publish recorded in the
+   notes-volume ledger. Remaining M2/M3 (orchestrator LLM on rails, broker-side
+   reviewer) per [agent-orchestration.md](agent-orchestration.md).
+
+M1 first-boot friction found and fixed (all live, none static):
+- A named volume layered over the `:ro` harness bind initializes from the
+  HOST's `node_modules` (darwin binaries, host-uid ownership) → `npm ci`
+  EACCES. Fix: both cages copy the harness to container-local disk and install
+  there (`scripts/prepare-harness-run.sh`); `MRW_WORKSPACE_ROOT` pins the
+  workspace root since the module path no longer lives in the tree.
+- GNU tar on colima/virtiofs intermittently reports "file changed as we read
+  it" (exit 1) for an unchanging tree — treat exit 1 as a warning, ≥2 as fatal.
+- `PIPESTATUS` must be snapshotted in a single statement (any following
+  command, even an assignment, clobbers it).
+- `humanApproval` robustness (found when the smoke run died silently at the
+  last gate): stdin EOF left readline's promise unsettled and node exited 0
+  mid-await without recording an outcome. EOF now resolves as a fail-closed
+  DECLINE.
 
 Post-run hardening (found during a design walkthrough after the live runs,
 FIXED 2026-07-15): the broker's *source* was the one runtime input still read

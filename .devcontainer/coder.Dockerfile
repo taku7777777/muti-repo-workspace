@@ -1,9 +1,13 @@
-# Phase 0 coder image.
+# M1 coder image — now shared by BOTH the `worker` and `orchestrator` compose
+# services (see docker-compose.yml). The two services diverge entirely at the
+# compose layer (mounts, env, command); the image itself stays one build so the
+# egress-proxy wiring, CLI install, and OS tooling below are identical in both
+# cages and there is only one Dockerfile to keep in sync.
 #
 # Base ships Node 20 + a non-root `node` user (required: the CLI refuses
 # --dangerously-skip-permissions / bypassPermissions as root). All package
 # fetching happens HERE, at build time, on the default build network (which has
-# internet). At RUNTIME the coder is on the internal-only network, so anything
+# internet). At RUNTIME both services are on internal-only networks, so anything
 # not baked in must come through the allowlisting proxy.
 FROM mcr.microsoft.com/devcontainers/typescript-node:20
 
@@ -29,5 +33,14 @@ RUN npm install -g @anthropic-ai/claude-code || true
 # Harness npm dependencies are installed in postCreate (registry.npmjs.org is
 # allowlisted), because the repo — including harness/ — is bind-mounted at
 # runtime and would shadow anything COPYed to that path at build time.
+
+# Socket/notes mountpoints must be node-owned BEFORE the fresh named volumes
+# mount over them: an empty named volume inherits the mountpoint's ownership,
+# and Docker creates the mountpoint root:root 0755, so `node` binding a socket
+# (worker's workerd.sock) or writing notes (orchestrator's MRW_STATE_DIR) there
+# would get EACCES and the service would exit(1). Pre-creating both node-owned
+# makes the fresh volumes node-owned (same EACCES lesson as broker.Dockerfile's
+# /run/broker; one RUN covers both services since they share this image).
+RUN install -d -o node -g node -m 0755 /run/worker /var/mrw/notes
 
 USER node

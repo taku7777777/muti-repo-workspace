@@ -48,10 +48,36 @@ credential 不在のアサーションは Phase 0 セルフチェックで live 
    plan が兄弟リポジトリへ越境スコープしたのを combined plan gate で人間が却下(下記
    所見参照)、スコープを明示した再実行で両リポジトリを broker 経由で publish、リモートの
    ref は承認 sha と完全一致。
-5. 最初の役割分割の増分(3–4 の後): **読み取り専用ジャッジコンテナ**(ソース `:ro`、
-   egress は anthropic のみ)で PLAN と REVIEW を走らせる — レビューの独立性を
-   アプリ層のツール制御から OS 境界に格上げする。
-   [agent-roles.md](agent-roles.md) の「採用順序」参照。
+5. ~~最初の役割分割の増分: orchestrator/worker のコンテナ分離~~
+   **実装 + live 検証済み 2026-07-15**([agent-orchestration.md](agent-orchestration.md)
+   の M1)。coder ケージは2つのセルになった: **worker**(tasks/ のみ rw、
+   harness/repositories は `:ro`、**broker ソケットなし** — publish を依頼すら
+   できない)は型付き改行区切り JSON の RPC デーモン(`harness/src/workerd/`、
+   broker ソケットパターンのクローン)で setup/implement/fix/test を実行し、
+   **orchestrator**(ワークスペース全体をマウントレベルで `:ro`、唯一の broker
+   ソケット + worker RPC ソケットを保持、spine 台帳は `MRW_STATE_DIR` の専用
+   notes volume)は coded spine + 読み取り専用 PLAN/REVIEW セッションを走らせる。
+   worker デーモンは implement/fix 後に決定論的にコミットする(`mrw:` プレフィックス)
+   ので、review/publish の diff は読み取り専用の commit range `baseSha..HEAD` —
+   orchestrator が計算し、worker の申告は使わない — となり、worktree は broker に
+   対して常にクリーン。単一コンテナ fallback は維持(`WORKERD_SOCKET` 未設定 ⇒
+   in-process、コミット意味論は同一)。live 検証: 両ケージで role self-check 全 PASS、
+   `:ro` マウント上の plan/review + RPC 越しの implement/tests + notes volume への
+   stub publish 記録まで driver 1周完走。残りは memo の M2/M3(レール上の
+   orchestrator LLM、broker 側 reviewer)。
+
+M1 の初回 boot 摩擦(すべて live で発見、静的検査ではゼロ):
+- `:ro` の harness bind に重ねた named volume は**ホスト側** node_modules(darwin
+  バイナリ・ホスト uid 所有)から初期化される → `npm ci` が EACCES。修正: 両ケージが
+  ソースをコンテナローカルへコピーしてそこへインストール
+  (`scripts/prepare-harness-run.sh`)。モジュールパスがツリー外に出るため
+  `MRW_WORKSPACE_ROOT` でワークスペースルートを固定。
+- colima/virtiofs 上の GNU tar は変化していないツリーにも「file changed as we
+  read it」(exit 1)を断続的に報告する — exit 1 は警告扱い、2以上のみ致命に。
+- `PIPESTATUS` は1文でスナップショットすること(直後のコマンドは代入でも上書きする)。
+- `humanApproval` の堅牢化(スモーク実行が最終ゲートで静かに死んで発見): stdin の
+  EOF で readline の promise が未解決のまま node が exit 0 し、outcome が未記録に
+  なっていた。EOF は fail-closed な **DECLINE** として解決するよう修正。
 
 live 実行後の堅牢化(実行後の設計ウォークスルーで発見、**2026-07-15 修正済み**):
 broker の*ソースコード*が、coder の書けるツリーから読まれる最後の実行時入力だった —

@@ -51,7 +51,10 @@ credential 不在のアサーションは Phase 0 セルフチェックで live 
 5. 最初の役割分割の増分(3–4 の後): **読み取り専用ジャッジコンテナ**(ソース `:ro`、
    egress は anthropic のみ)で PLAN と REVIEW を走らせる — レビューの独立性を
    アプリ層のツール制御から OS 境界に格上げする。
-   [agent-roles.md](agent-roles.md) の「採用順序」参照。
+   [agent-roles.md](agent-roles.md) の「採用順序」参照。*(2026-07-15: 設計は
+   [agent-orchestration.ja.md](agent-orchestration.ja.md) で確定・拡張 —
+   ジャッジコンテナは orchestrator コンテナとなる: coded spine + 型付きアクションの
+   レール上の orchestrator LLM + broker 側の助言 reviewer。)*
 
 live 実行後の堅牢化(実行後の設計ウォークスルーで発見、**2026-07-15 修正済み**):
 broker の*ソースコード*が、coder の書けるツリーから読まれる最後の実行時入力だった —

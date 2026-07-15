@@ -187,6 +187,10 @@ never rested on tool scoping). Further role splits (Documenter / Researcher /
 Reporter) wait for the dispatch control plane
 ([agent-dispatch.md](agent-dispatch.md)) — cross-container handoffs must be
 typed and dispatcher-mediated before more roles exist.
+*(2026-07-15 update: this increment is absorbed and detailed by
+[agent-orchestration.md](agent-orchestration.md) — the judge container becomes
+the orchestrator container, running the coded spine + the orchestrator LLM +
+PLAN/REVIEW.)*
 
 ## Open questions / next steps
 

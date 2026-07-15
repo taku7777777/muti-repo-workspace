@@ -7,7 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib/common.sh"
 
 WORKSPACE_ROOT="$(workspace_root)"
-TASKS_DIR="$WORKSPACE_ROOT/tasks"
+STATE_ROOT="$(state_root)"
+TASKS_DIR="$STATE_ROOT/tasks"
 
 found=false
 for task in "$TASKS_DIR"/*/; do

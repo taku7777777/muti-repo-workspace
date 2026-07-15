@@ -130,12 +130,15 @@ services:
       ANTHROPIC_API_KEY:
     volumes:
       # The worktrees a ticket's implement/fix/test steps write into. This is
-      # the ONLY rw surface in this cage.
-      - ../tasks:/workspaces/muti-repo-workspace/tasks
+      # the ONLY rw surface in this cage. MRW_STATE_ROOT points repositories/
+      # + tasks/ at an externalized state_root (config/workspace.json
+      # `.state_root`); unset ⇒ `..` (the tool checkout), byte-identical to
+      # the legacy layout (see scripts/devcontainer-up.sh).
+      - ${MRW_STATE_ROOT:-..}/tasks:/workspaces/muti-repo-workspace/tasks
       # Origins are the clone --reference SOURCE (Phase 3) and must never be
       # worker-writable — mount them READ-ONLY. A prompt-injected worker cannot
       # corrupt the shared origin clones every ticket's worktrees derive from.
-      - ../repositories:/workspaces/muti-repo-workspace/repositories:ro
+      - ${MRW_STATE_ROOT:-..}/repositories:/workspaces/muti-repo-workspace/repositories:ro
       # The harness/spine SOURCE — read-only. The worker executes the daemon,
       # it must not be able to rewrite the code that defines its own tool
       # posture (that would let an injected LLM re-arm itself with new tools).
@@ -234,6 +237,14 @@ services:
       # injected orchestrator LLM has no path to alter code, spine source, or
       # broker policy from inside this mount.
       - ..:/workspaces/muti-repo-workspace:ro
+      # Nested state mounts, layered OVER the `..` mount above (a longer
+      # container path wins): repositories/ + tasks/ actually live at
+      # MRW_STATE_ROOT (see the worker service comment above). Unset ⇒ these
+      # resolve to ../tasks and ../repositories — the SAME content already
+      # covered by the `..` mount, so the overlay is a harmless no-op and
+      # behavior is byte-identical to before this existed.
+      - ${MRW_STATE_ROOT:-..}/tasks:/workspaces/muti-repo-workspace/tasks:ro
+      - ${MRW_STATE_ROOT:-..}/repositories:/workspaces/muti-repo-workspace/repositories:ro
       # The spine's rw notes/ledger volume (see MRW_STATE_DIR above).
       - spine-notes:/var/mrw/notes
       # The ONLY service besides `broker` itself that holds this socket.
@@ -266,7 +277,9 @@ services:
   # short-lived GitHub token in ITS env, NEVER the coder's. It reaches the coder
   # only through the shared `broker-sock` named volume (the typed socket). It
   # NEVER trusts the coder-writable worktree tree: policy comes from a
-  # broker-OWNED file baked into this image at BROKER_POLICY_FILE, git config is
+  # broker-OWNED, tool_home file bind-mounted read-only at BROKER_POLICY_FILE
+  # (Phase 1: shared across workspaces, not baked into the image — see the
+  # broker service's volumes: below), git config is
   # isolated, and every push goes to a broker-constructed, allowlist-validated URL
   # from a broker-private scratch repo. The human approval gate is on THIS
   # container's stdin — attach a terminal to answer it (see docs/devcontainer-phase2.md).
@@ -291,9 +304,12 @@ services:
       # component that must hold NO token). The broker has NO env_file for exactly
       # this reason.
       BROKER_GITHUB_TOKEN: ${BROKER_GITHUB_TOKEN:-}
-      # TRUSTED policy, baked into the image (see broker.Dockerfile) — NOT read from
-      # the coder-writable /workspaces mount. Override at runtime only with a bind
-      # mount from a host path OUTSIDE the workspace.
+      # TRUSTED policy — bind-mounted read-only at runtime from tool_home
+      # config/broker-policy.json (see the volumes: block below and
+      # broker.Dockerfile), NOT read from the coder-writable /workspaces
+      # mount. Phase 1: this is tool_home config, so it is shared across every
+      # workspace/state_root; per-state_root policy divergence is a Phase 2
+      # concern once config/ itself becomes relocatable.
       BROKER_POLICY_FILE: /etc/mrw-broker/policy.json
       # The coder-writable worktrees the broker reads objects from (mounted :ro).
       # Overridable from the host shell — point at tasks/<TICKET>/repositories for
@@ -327,6 +343,9 @@ services:
       # build (see broker.Dockerfile). The host's broker/src lives inside the
       # coder-writable workspace tree, so mounting it (even :ro) would let a
       # tampered source execute with the token on the next broker restart.
+      # The TRUSTED policy, however, is now bind-mounted (de-baked from the
+      # image so editing it needs no rebuild) — tool_home config, read-only:
+      - ../config/broker-policy.json:/etc/mrw-broker/policy.json:ro
       # The shared socket named volume (also mounted in the coder).
       - broker-sock:/run/broker
       # M3: shared with the `reviewer` service. The broker holds the ONLY
@@ -339,6 +358,15 @@ services:
       # The coder-writable worktrees — READ-ONLY. The broker reads objects by sha;
       # it never writes here and never executes anything from here.
       - ..:/workspaces/muti-repo-workspace:ro
+      # Nested state mounts, layered OVER the `..` mount above (a longer
+      # container path wins) — see the orchestrator service's matching
+      # comment. Unset MRW_STATE_ROOT ⇒ ../tasks + ../repositories, the same
+      # content the `..` mount already provides: harmless, byte-identical.
+      - ${MRW_STATE_ROOT:-..}/tasks:/workspaces/muti-repo-workspace/tasks:ro
+      - ${MRW_STATE_ROOT:-..}/repositories:/workspaces/muti-repo-workspace/repositories:ro
+      # BROKER_WORKTREES_DIR (env above) defaults to the container-internal
+      # .../repositories path, unchanged — the nested mount above ensures
+      # that path's CONTENT reflects the configured state_root.
     # The human approval gate reads/writes this container's stdio. Attach with
     # `docker compose attach broker` (or run it via `docker compose run`).
     stdin_open: true

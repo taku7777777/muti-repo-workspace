@@ -18,6 +18,25 @@ workspace_root() {
   dirname "$(dirname "$lib_dir")"
 }
 
+# state_root — where repositories/ and tasks/ live. Configurable via
+# config/workspace.json `.state_root`; defaults to the tool checkout so the
+# unconfigured case is identical to the historical layout.
+state_root() {
+  local sr
+  sr="$(json_get "$(workspace_root)/config/workspace.json" '.state_root' '')"
+  if [ -n "$sr" ]; then
+    # Must be absolute: it is interpolated into container bind sources, git
+    # worktree targets and sandbox paths, where a relative value would resolve
+    # against the caller's cwd and silently misplace state.
+    case "$sr" in
+      /*) printf '%s' "$sr" ;;
+      *)  die "config/workspace.json .state_root must be an absolute path (got '$sr')" ;;
+    esac
+  else
+    workspace_root
+  fi
+}
+
 # to_home_path <abs-path>
 # Rewrite an absolute path under $HOME to its ~/ form. Paths written into
 # sandbox excludedCommands / Bash allow rules and the matching call sites in
@@ -66,6 +85,7 @@ render_template() {
   local out
   out="$(sed \
     -e "s|{{WORKSPACE_ROOT}}|$(sed_escape "${WORKSPACE_ROOT:-}")|g" \
+    -e "s|{{STATE_ROOT}}|$(sed_escape "${STATE_ROOT:-}")|g" \
     -e "s|{{TASK_DIR}}|$(sed_escape "${TASK_DIR:-}")|g" \
     -e "s|{{TASK_DIR_H}}|$(sed_escape "${TASK_DIR_H:-}")|g" \
     -e "s|{{TICKET_ID}}|$(sed_escape "${TICKET_ID:-}")|g" \

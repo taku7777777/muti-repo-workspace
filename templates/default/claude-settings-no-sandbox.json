@@ -37,7 +37,7 @@
       "Read(~/.npmrc)",
       "Edit(/{{TASK_DIR}}/agents/**)",
       "Edit(/{{TASK_DIR}}/scripts/**)",
-      "Edit(/{{WORKSPACE_ROOT}}/repositories/**)",
+      "Edit(/{{STATE_ROOT}}/repositories/**)",
       "Edit(/{{WORKSPACE_ROOT}}/scripts/**)",
       "Edit(/{{WORKSPACE_ROOT}}/templates/**)",
       "Edit(/{{WORKSPACE_ROOT}}/config/**)",

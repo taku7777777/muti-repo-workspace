@@ -15,6 +15,18 @@ set -euo pipefail
 TASK_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WORKSPACE_ROOT="$(cd "$TASK_DIR/../.." && pwd)"
 
+# This derivation assumes the task dir sits directly under the tool checkout
+# (its `.githooks` lives here). In the container the whole tree is unified at
+# /workspaces/muti-repo-workspace, so it holds; on the macOS path it holds when
+# state_root == tool_home. If repositories/tasks were externalized to a
+# state_root != tool_home, `$WORKSPACE_ROOT/.githooks` would be wrong and the
+# forced hooksPath on the push below would silently skip the org/host guard.
+# Fail CLOSED — never push without the audited pre-push hook present.
+if [ ! -x "$WORKSPACE_ROOT/.githooks/pre-push" ]; then
+  echo "ERROR: pre-push hook not found at $WORKSPACE_ROOT/.githooks/pre-push — refusing to push without the org/host guard (externalized state_root is not supported on this publish path yet)." >&2
+  exit 1
+fi
+
 REPO="${1:?usage: push-create-pr.sh <repo> --title ... (--body ... | --body-file ...)}"
 shift
 

@@ -16,5 +16,8 @@
   "ticket_id_pattern_note": "Ticket IDs must match this pattern. The prefix is required and never auto-added.",
 
   "branch_prefix": "feat/",
-  "branch_prefix_note": "Task worktree branches are named <branch_prefix><TICKET_ID>."
+  "branch_prefix_note": "Task worktree branches are named <branch_prefix><TICKET_ID>.",
+
+  "state_root": "",
+  "state_root_note": "Absolute path where repositories/ and tasks/ live. Empty ⇒ the tool checkout (legacy layout, byte-for-byte identical to before this field existed). Everything else (config/, scripts/, templates/, harness/, .githooks/, .claude/, docker/, .devcontainer/) always stays in the tool checkout."
 }

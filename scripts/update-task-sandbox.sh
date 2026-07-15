@@ -28,7 +28,8 @@ VALUE="${3:-}"
 validate_ticket_id "$TICKET_ID"
 
 WORKSPACE_ROOT="$(workspace_root)"
-SETTINGS="$WORKSPACE_ROOT/tasks/$TICKET_ID/agents/worker/.claude/settings.json"
+STATE_ROOT="$(state_root)"
+SETTINGS="$STATE_ROOT/tasks/$TICKET_ID/agents/worker/.claude/settings.json"
 [ -f "$SETTINGS" ] || die "no worker settings for task $TICKET_ID"
 
 apply() { # <jq-program> [--arg k v ...]

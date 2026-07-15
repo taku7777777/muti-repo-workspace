@@ -12,11 +12,15 @@
 # repositories/<repo> on <branch>. Sparse checkout for knowledge repos.
 create_worktree() {
   local repo="$1" ticket="$2" branch="$3" purpose="$4"
-  local root origin target_rel target_abs repo_type
-  root="$(workspace_root)"
-  origin="$root/repositories/$repo"
+  local sroot troot origin target_rel target_abs repo_type
+  # repositories/ (origin) and tasks/ (target) live under state_root; keeping
+  # them siblings there preserves the RELATIVE target below (`../../tasks/...`
+  # resolves within state_root). config/ stays under the tool checkout.
+  sroot="$(state_root)"
+  troot="$(workspace_root)"
+  origin="$sroot/repositories/$repo"
   target_rel="../../tasks/$ticket/repositories/$repo"
-  target_abs="$root/tasks/$ticket/repositories/$repo"
+  target_abs="$sroot/tasks/$ticket/repositories/$repo"
 
   [ -d "$origin/.git" ] || die "repository '$repo' is not cloned (run /setup-workspace first)"
   if [ -d "$target_abs" ]; then
@@ -45,7 +49,7 @@ create_worktree() {
     local paths
     paths="$(jq -r --arg n "$repo" --arg p "$purpose" \
       '.repositories[] | select(.name == $n) | .sparse_paths[$p] // [] | join(" ")' \
-      "$root/config/repos.json")"
+      "$troot/config/repos.json")"
     if [ -n "$paths" ]; then
       info "  - $repo: sparse checkout ($paths)"
       # shellcheck disable=SC2086
@@ -63,7 +67,7 @@ create_worktree() {
 # never guess). Returns non-zero if the worktree does not exist yet.
 worktree_gitdir() {
   local wt
-  wt="$(workspace_root)/tasks/$2/repositories/$1"
+  wt="$(state_root)/tasks/$2/repositories/$1"
   [ -d "$wt" ] || return 1
   git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null
 }
@@ -71,7 +75,8 @@ worktree_gitdir() {
 # remove_worktrees <ticket-id> — detach all worktrees of a task, then prune.
 remove_worktrees() {
   local ticket="$1" root wt repo origin
-  root="$(workspace_root)"
+  # Both tasks/ and repositories/ live under state_root.
+  root="$(state_root)"
   for wt in "$root/tasks/$ticket/repositories"/*/; do
     [ -d "$wt" ] || continue
     repo="$(basename "$wt")"

@@ -5,11 +5,13 @@
 # the coder ONLY through the shared unix socket (a Docker named volume).
 #
 # It shares the coder image's base (Node 20 + a non-root `node` user + git), and
-# adds the GitHub CLI. EVERYTHING the broker executes is baked in at BUILD time —
-# npm deps (zod, tsx, typescript), the policy, AND the TypeScript source. Nothing
-# the runtime coder can write (the /workspaces tree, incl. broker/src on the host)
-# influences broker execution; changing broker code requires an image rebuild,
-# which is a trusted, human-initiated moment.
+# adds the GitHub CLI. Everything the broker EXECUTES is baked in at BUILD time —
+# npm deps (zod, tsx, typescript) AND the TypeScript source. Nothing the runtime
+# coder can write (the /workspaces tree, incl. broker/src on the host) influences
+# broker execution; changing broker code requires an image rebuild, which is a
+# trusted, human-initiated moment. (The POLICY is the one exception, Phase 1: it
+# is bind-mounted at runtime from tool_home config/ — see below — so it can be
+# edited without a rebuild; it is still never read from the coder-writable tree.)
 FROM mcr.microsoft.com/devcontainers/typescript-node:20
 
 # --- GitHub CLI (for `gh pr create`) ---
@@ -32,26 +34,29 @@ WORKDIR /broker
 COPY broker/package.json broker/package-lock.json ./
 RUN npm ci
 
-# --- Broker SOURCE, baked in at build (same reasoning as the policy below).
-#     Previously bind-mounted :ro from ../broker/src — but that host path lives
-#     inside the coder-writable workspace tree, so a prompt-injected coder could
-#     tamper the source and have it execute (with the token) on the next broker
-#     restart. Baking closes that restart-time supply path. ---
+# --- Broker SOURCE, baked in at build (unlike the policy below, which is
+#     bind-mounted). A bind mount here would come from ../broker/src, a host
+#     path inside the coder-writable workspace tree, so a prompt-injected
+#     coder could tamper the source and have it execute (with the token) on
+#     the next broker restart. Baking closes that restart-time supply path —
+#     the policy doesn't carry this risk since it is inert data, not code. ---
 COPY broker/tsconfig.json ./tsconfig.json
 COPY broker/src ./src
 
-# --- TRUSTED policy, baked in at build (a trusted moment) so the RUNTIME coder
-#     cannot alter it. Root-owned + world-read: the broker reads it, no one in the
-#     container can rewrite it, and it lives OUTSIDE the coder-writable /workspaces
-#     mount so the broker's F2 containment check accepts it. Override at runtime by
-#     bind-mounting a host file (OUTSIDE the workspace) over this path. ---
+# --- TRUSTED policy directory. The policy FILE itself is no longer baked in
+#     at build — it is bind-mounted read-only at container start from
+#     tool_home's config/broker-policy.json (see docker-compose.yml's broker
+#     service volumes:), so editing the policy no longer needs an image
+#     rebuild. Phase 1 caveat: this is tool_home config, shared across every
+#     workspace/state_root — per-state_root divergence is Phase 2. The mount
+#     point is created here (and left root-owned) so the runtime bind has
+#     somewhere to land; it still lives OUTSIDE the coder-writable
+#     /workspaces mount, so the broker's F2 containment check accepts it. ---
 RUN install -d -m 0755 /etc/mrw-broker
-COPY config/broker-policy.json /etc/mrw-broker/policy.json
-RUN chmod 0444 /etc/mrw-broker/policy.json
 
 # The `node` user runs the broker and needs to write the tsx cache under /broker.
 # The baked src is then stripped of write bits (read-only even inside the
-# container); the baked policy in /etc stays root-owned.
+# container).
 RUN chown -R node:node /broker \
  && chmod -R a-w /broker/src /broker/tsconfig.json
 

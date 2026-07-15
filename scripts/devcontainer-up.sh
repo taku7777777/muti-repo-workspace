@@ -17,6 +17,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/common.sh
+. "$SCRIPT_DIR/lib/common.sh"
+
 KEYCHAIN_SERVICE="claude-code-oauth-token"
 
 if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
@@ -29,6 +33,14 @@ if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
     echo "  or export CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY before running this script." >&2
     exit 1
   fi
+fi
+
+# Point the compose state binds at the configured state_root (repositories/ +
+# tasks/). Unset ⇒ compose falls back to `..` (the tool checkout) = legacy.
+_state_root="$(state_root)"
+if [ "$_state_root" != "$(workspace_root)" ]; then
+  export MRW_STATE_ROOT="$_state_root"
+  mkdir -p "$_state_root/tasks" "$_state_root/repositories"
 fi
 
 # Idempotent: the `telemetry` network is `external: true` in the compose

@@ -2,11 +2,13 @@
 
 [../devcontainer-orchestrator-architecture.md](../../devcontainer-orchestrator-architecture.md) の設計に対応する文書。
 ここでは**ビルド済み + 静的に検証済み**なものと残りを追跡する。
-**live boot 状況(2026-07-14): Phase 0 と 1 は実機で稼働済み** — スタックが boot し、
+**live boot 状況(2026-07-15): Phase 0–2 は実機で稼働済み。** スタックが boot し、
 egress セルフチェックは coder 内から全6項目 PASS、Phase 1 パイプラインはデモリポジトリで
-1周を完走した(plan → 人間の承認 → implement → 独立レビューの承認 → test-gate green →
-publish ゲート)。認証は macOS Keychain から注入したサブスクリプションの OAuth トークン。
-Phase 2–3 は静的検証のみのまま。
+1周を完走(認証は macOS Keychain から注入したサブスクリプションの OAuth トークン)、
+そして Phase 2 broker が実際の publish を1回実行した: ソケット越しの型付き intent →
+ground truth の描画 → 人間が broker 側で sha をタイプ → 承認した sha そのものを push →
+`gh pr create`(taku7777777/phase2-demo#1)。実行後も coder の egress セルフチェックは
+PASS のまま。Phase 3 は静的検証のみのまま。
 
 > 🇬🇧 English: [devcontainer-status.md](devcontainer-status.md)
 
@@ -34,8 +36,11 @@ credential 不在のアサーションは Phase 0 セルフチェックで live 
    `scripts/devcontainer-up.sh`(Keychain 注入の認証)、セルフチェック 6/6 PASS。
 2. ~~Phase 1: 単一リポジトリで harness をエンドツーエンドで走らせる~~ **完了 2026-07-14** —
    デモリポジトリで1周完走。publish ゲートは設計通り拒否(broker はループ外)。
-3. Phase 2: `export BROKER_GITHUB_TOKEN=…`、`config/broker-policy.json` を編集し、
-   broker 経由で publish を1回通す([devcontainer-phase2.md](devcontainer-phase2.md) 参照)。
+3. ~~Phase 2: broker 経由で publish を1回通す~~ **完了 2026-07-15** —
+   fine-grained PAT(単一リポジトリ・7日有効)は broker のみに保持。policy は
+   `allowed_push_orgs=[taku7777777]` で焼き込み。`BROKER_WORKTREES_DIR` は
+   `tasks/<T>/repositories` を指す(`repositories/` 配下は coder にとって `:ro` のため)。
+   リモートの ref は承認した sha ちょうどに着地。
 4. Phase 3: マルチリポジトリのチケットを1つ走らせる([devcontainer-phase3.md](devcontainer-phase3.md) 参照)。
 5. 最初の役割分割の増分(3–4 の後): **読み取り専用ジャッジコンテナ**(ソース `:ro`、
    egress は anthropic のみ)で PLAN と REVIEW を走らせる — レビューの独立性を
@@ -49,6 +54,10 @@ credential 不在のアサーションは Phase 0 セルフチェックで live 
 - Zod v4 の `z.toJSONSchema()` が draft 2020-12 のメタスキーマ参照を刻むが、同梱の
   Claude Code CLI の ajv(draft-07)はそれを解決できない — `harness/src/sdk.ts` で
   `target: "draft-7"` を指定して解消。
+- 既知の見た目の問題(未対応): REVIEW ステップの構造化サマリの末尾に、モデル出力の
+  タグ片(`</summary>`、`</invoke>`)が混ざることがあり、broker が描画する PR body に
+  そのまま流れる。無害だが見苦しい — harness が publish に渡す前に構造化レビュー文を
+  サニタイズすべき。
 
 ## Phase 4 — egress の堅牢化(設計済み・未ビルド)
 

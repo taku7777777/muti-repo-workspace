@@ -2,12 +2,14 @@
 
 Companion to the design in [../devcontainer-orchestrator-architecture.md](../../devcontainer-orchestrator-architecture.md).
 This tracks what is **built + statically validated** vs what remains.
-**Live-boot status (2026-07-14): Phases 0 and 1 have now run live** — the stack
-boots, the egress self-check passes all 6 assertions from inside the coder, and
-the Phase 1 pipeline completed a full cycle (plan → human approve → implement →
-independent review approve → test-gate green → publish gate) on a demo repo,
-authenticated with a subscription OAuth token injected from the macOS Keychain.
-Phases 2–3 remain statically validated only.
+**Live-boot status (2026-07-15): Phases 0–2 have now run live.** The stack
+boots, the egress self-check passes all 6 assertions from inside the coder, the
+Phase 1 pipeline completed a full cycle on a demo repo (subscription OAuth token
+injected from the macOS Keychain), and the Phase 2 broker performed a real
+publish: typed intent over the socket → ground-truth render → human typed the
+sha at the broker → push of exactly the approved sha → `gh pr create`
+(taku7777777/phase2-demo#1), with the coder's egress self-check still passing
+afterwards. Phase 3 remains statically validated only.
 
 ## Built & validated (Phase 0–3)
 
@@ -34,8 +36,11 @@ Phase 0 self-check):
    `scripts/devcontainer-up.sh` (Keychain-injected auth), self-check 6/6 PASS.
 2. ~~Phase 1: run the harness on a single repo end-to-end~~ **DONE 2026-07-14** —
    full cycle on a demo repo; publish gate declined by design (no broker in the loop).
-3. Phase 2: `export BROKER_GITHUB_TOKEN=…`, edit `config/broker-policy.json`, and
-   drive one publish through the broker (see [devcontainer-phase2.md](devcontainer-phase2.md)).
+3. ~~Phase 2: drive one publish through the broker~~ **DONE 2026-07-15** —
+   fine-grained PAT (single-repo, 7-day) in the broker only; policy baked with
+   `allowed_push_orgs=[taku7777777]`; `BROKER_WORKTREES_DIR` pointed at
+   `tasks/<T>/repositories` (worktrees under `repositories/` are `:ro` for the
+   coder); the remote ref landed on exactly the approved sha.
 4. Phase 3: run one multi-repo ticket (see [devcontainer-phase3.md](devcontainer-phase3.md)).
 5. First role-split increment (after 3–4): a **read-only judge container**
    (source `:ro`, anthropic-only egress) running PLAN and REVIEW — upgrades
@@ -48,6 +53,10 @@ cannot surface):
   binaries into the Linux container — fixed by running `.devcontainer/postCreate.sh`
   (in-container `npm ci`) when attaching via `docker compose exec` instead of the
   VS Code devcontainer flow.
+- Known cosmetic issue (open): the REVIEW step's structured summary occasionally
+  carries trailing model-output tag fragments (`</summary>`, `</invoke>`), which
+  flow verbatim into the broker-rendered PR body. Harmless but ugly — the harness
+  should sanitize/strip the structured review text before it reaches publish.
 - Zod v4's `z.toJSONSchema()` stamps the draft 2020-12 meta-schema ref, which the
   bundled Claude Code CLI's ajv (draft-07) cannot resolve — fixed with
   `target: "draft-7"` in `harness/src/sdk.ts`.

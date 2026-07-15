@@ -52,7 +52,10 @@ Phase 0 self-check):
 5. First role-split increment (after 3–4): a **read-only judge container**
    (source `:ro`, anthropic-only egress) running PLAN and REVIEW — upgrades
    review independence from app-layer tool scoping to an OS boundary. See
-   [agent-roles.md](agent-roles.md) § Adoption order.
+   [agent-roles.md](agent-roles.md) § Adoption order. *(2026-07-15: design
+   settled and extended in [agent-orchestration.md](agent-orchestration.md) —
+   the judge container becomes the orchestrator container: coded spine +
+   orchestrator LLM on typed-action rails + a broker-side advisory reviewer.)*
 
 Post-run hardening (found during a design walkthrough after the live runs,
 FIXED 2026-07-15): the broker's *source* was the one runtime input still read

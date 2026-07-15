@@ -178,6 +178,9 @@ Plan と Review は boundary matrix の*同じ*セル(write `none` × egress ant
 それ以上の役割分割(Documenter / Researcher / Reporter)は dispatch 制御プレーン
 ([agent-dispatch.md](agent-dispatch.md))を待つ — コンテナ間ハンドオフが型付きかつ
 dispatcher 仲介になる前に、役割を増やしてはならない。
+*(2026-07-15 更新: この増分は [agent-orchestration.ja.md](agent-orchestration.ja.md)
+に吸収・詳細化された — ジャッジコンテナは orchestrator コンテナとなり、coded spine +
+orchestrator LLM + PLAN/REVIEW を走らせる。)*
 
 ## 未解決の論点 / 次の一手
 

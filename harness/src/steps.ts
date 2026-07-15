@@ -39,6 +39,7 @@ import {
   READ_ONLY_TOOLS,
   runStructuredQuery,
 } from "./sdk.js";
+import { telemetryEnv, ticketFromRepoDir } from "./telemetry.js";
 
 /**
  * Heuristic: does the working diff touch test files or the test runner config?
@@ -85,6 +86,9 @@ export async function runPlan(instruction: string, repoDir: string): Promise<Pla
       // Judge independence: do NOT load the target repo's CLAUDE.md/.claude.
       settingSources: [],
       maxTurns: 40,
+      // Self-derived from repoDir (this process's own worktree path), never
+      // a forwarded string — see telemetry.ts's header.
+      env: telemetryEnv(ticketFromRepoDir(repoDir), "plan"),
     },
   );
 }
@@ -133,6 +137,9 @@ export async function runReview(
       disallowedTools: DENY_MUTATION,
       settingSources: [],
       maxTurns: 40,
+      // Self-derived from repoDir, never a forwarded string — see
+      // telemetry.ts's header.
+      env: telemetryEnv(ticketFromRepoDir(repoDir), "review"),
     },
   );
 }

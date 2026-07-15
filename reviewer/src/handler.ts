@@ -21,7 +21,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { ReviewerRequestSchema, ReviewerVerdictSchema } from "./types.js";
 import type { ReviewerRequest, ReviewerResponse } from "./types.js";
-import { runStructuredQuery } from "./sdk.js";
+import { reviewerTelemetryEnv, runStructuredQuery } from "./sdk.js";
 
 const MAX_DIFF_READ_BYTES = 4 * 1024 * 1024;
 
@@ -153,7 +153,9 @@ export async function handleReviewRequest(raw: unknown, signal: AbortSignal): Pr
     const verdict = await runStructuredQuery(
       ReviewerVerdictSchema,
       buildPrompt(diff, req.title, req.untrustedBody),
-      { abortController: ac },
+      // req.ticket is the broker-derived value (self-composed, never the
+      // untrusted title/body) — see types.ts's field comment.
+      { abortController: ac, env: reviewerTelemetryEnv(req.ticket) },
     );
     return { ok: true, verdict: verdict.verdict, notes: verdict.notes };
   } catch (e) {

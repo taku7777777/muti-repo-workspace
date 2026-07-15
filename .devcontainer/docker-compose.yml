@@ -69,6 +69,7 @@ services:
       - no-new-privileges:true
     networks:
       - caged
+      - telemetry
     environment:
       # Usability: point every proxy-aware tool at the gateway. Both cases,
       # because Unix tools read them inconsistently.
@@ -76,12 +77,30 @@ services:
       HTTPS_PROXY: http://egress-proxy:3128
       http_proxy: http://egress-proxy:3128
       https_proxy: http://egress-proxy:3128
-      # Never proxy loopback or the proxy's own service name.
-      NO_PROXY: localhost,127.0.0.1,::1,egress-proxy
-      no_proxy: localhost,127.0.0.1,::1,egress-proxy
+      # Never proxy loopback, the proxy's own service name, or the telemetry
+      # collector — OTLP export must go DIRECT over `telemetry`, never
+      # through Squid (which would CONNECT-reject a non-allowlisted host).
+      NO_PROXY: localhost,127.0.0.1,::1,egress-proxy,otel-collector
+      no_proxy: localhost,127.0.0.1,::1,egress-proxy,otel-collector
       # Keep a locked build from phoning home to a not-yet-allowlisted host.
       DISABLE_AUTOUPDATER: "1"
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+      # Per-ticket OTEL telemetry (docs/devcontainer-status.md item 10): the
+      # `telemetry` network (mrw-telemetry, external, internal-only — see the
+      # networks: block below) reaches ONLY the monitoring stack's
+      # otel-collector, never the internet. MRW_TELEMETRY=0 disables export
+      # entirely; OTEL_RESOURCE_ATTRIBUTES itself is NOT set here — every
+      # session composes it from its own validated ticket at call time (see
+      # harness/src/telemetry.ts), never from a static/forwarded env value.
+      CLAUDE_CODE_ENABLE_TELEMETRY: ${MRW_TELEMETRY:-1}
+      OTEL_METRICS_EXPORTER: otlp
+      OTEL_LOGS_EXPORTER: otlp
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: cumulative
+      OTEL_LOG_USER_PROMPTS: "1"
+      OTEL_LOG_TOOL_DETAILS: "1"
+      MRW_WORK_TYPE: ${MRW_WORK_TYPE:-feature}
       # There is no postCreate.sh in this service (command below runs `npm ci`
       # directly), so npm must be told about the proxy via env at startup —
       # postCreate's `npm config set proxy` step doesn't run here.
@@ -166,15 +185,28 @@ services:
       - no-new-privileges:true
     networks:
       - caged
+      - telemetry
     environment:
       HTTP_PROXY: http://egress-proxy:3128
       HTTPS_PROXY: http://egress-proxy:3128
       http_proxy: http://egress-proxy:3128
       https_proxy: http://egress-proxy:3128
-      NO_PROXY: localhost,127.0.0.1,::1,egress-proxy
-      no_proxy: localhost,127.0.0.1,::1,egress-proxy
+      NO_PROXY: localhost,127.0.0.1,::1,egress-proxy,otel-collector
+      no_proxy: localhost,127.0.0.1,::1,egress-proxy,otel-collector
       DISABLE_AUTOUPDATER: "1"
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+      # Per-ticket OTEL telemetry — see the worker service's comment above
+      # (same contract, same `telemetry` network, same self-composed
+      # OTEL_RESOURCE_ATTRIBUTES per session via harness/src/telemetry.ts).
+      CLAUDE_CODE_ENABLE_TELEMETRY: ${MRW_TELEMETRY:-1}
+      OTEL_METRICS_EXPORTER: otlp
+      OTEL_LOGS_EXPORTER: otlp
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: cumulative
+      OTEL_LOG_USER_PROMPTS: "1"
+      OTEL_LOG_TOOL_DETAILS: "1"
+      MRW_WORK_TYPE: ${MRW_WORK_TYPE:-feature}
       # The Phase 2 publish broker socket — the ONLY publish path, and the
       # orchestrator is the ONLY service that holds it (see docker-compose.yml
       # top-of-file topology comment). Shared via the `broker-sock` NAMED VOLUME.
@@ -360,15 +392,28 @@ services:
     # caged role, not given its own tighter one.
     networks:
       - caged
+      - telemetry
     environment:
       HTTP_PROXY: http://egress-proxy:3128
       HTTPS_PROXY: http://egress-proxy:3128
       http_proxy: http://egress-proxy:3128
       https_proxy: http://egress-proxy:3128
-      NO_PROXY: localhost,127.0.0.1,::1,egress-proxy
-      no_proxy: localhost,127.0.0.1,::1,egress-proxy
+      NO_PROXY: localhost,127.0.0.1,::1,egress-proxy,otel-collector
+      no_proxy: localhost,127.0.0.1,::1,egress-proxy,otel-collector
       DISABLE_AUTOUPDATER: "1"
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+      # Per-ticket OTEL telemetry — see the worker service's comment above
+      # (same contract; reviewer composes its own OTEL_RESOURCE_ATTRIBUTES
+      # via reviewer/src/sdk.ts's reviewerTelemetryEnv(), role=reviewer).
+      CLAUDE_CODE_ENABLE_TELEMETRY: ${MRW_TELEMETRY:-1}
+      OTEL_METRICS_EXPORTER: otlp
+      OTEL_LOGS_EXPORTER: otlp
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: cumulative
+      OTEL_LOG_USER_PROMPTS: "1"
+      OTEL_LOG_TOOL_DETAILS: "1"
+      MRW_WORK_TYPE: ${MRW_WORK_TYPE:-feature}
       REVIEWER_SOCKET_PATH: /run/reviewer/review.sock
       REVIEWER_DIFF_DIR: /var/mrw/review-diffs
       # Anthropic auth — same null-value-passthrough contract as the worker/
@@ -437,6 +482,30 @@ networks:
   # Neither the worker nor the orchestrator is here — neither gets github access.
   egress:
     driver: bridge
+  # DELIBERATELY OPENED, docs/devcontainer-status.md item 10: a SECOND
+  # `internal: true` network, reaching ONLY the monitoring stack's
+  # otel-collector — created OUTSIDE this compose file (idempotently, by
+  # scripts/devcontainer-up.sh) so it can be shared with the sibling
+  # claude-code-monitoring stack without either repo owning the other's
+  # lifecycle. `external: true` here means "attach to a network that must
+  # already exist", never "create/manage it from this file".
+  #   - No new internet route: still `internal: true`, same fail-closed
+  #     primitive as `caged`. The worker/orchestrator/reviewer cages gain
+  #     reachability to exactly one extra host (the collector), nothing else.
+  #   - broker and egress-proxy do NOT join this network — telemetry
+  #     attribution is a coder-session concern, not a publish-path one.
+  #   - Fail-open BY DESIGN (unlike the publish/broker path): if the
+  #     collector is absent or unreachable, the SDK's OTLP export silently
+  #     no-ops — telemetry must never be able to block or slow a step.
+  #   - Accepted risk: any of the three cages could send FAKE data or FLOOD
+  #     the local collector/Loki (a caged, prompt-injectable process talking
+  #     to a network peer it can reach). This is accepted for now because the
+  #     blast radius is a local monitoring stack, not the internet or the
+  #     publish path — see docs/devcontainer-status.md item 10 for the full
+  #     writeup.
+  telemetry:
+    name: mrw-telemetry
+    external: true
 
 volumes:
   # Shared unix-socket carrier between the orchestrator and the broker. A named

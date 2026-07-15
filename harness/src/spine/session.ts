@@ -26,6 +26,7 @@ import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk"
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { DENY_MUTATION, MODEL, READ_ONLY_TOOLS } from "../sdk.js";
 import { resolveWorkspaceRoot } from "../multi/config.js";
+import { telemetryEnv } from "../telemetry.js";
 import * as actions from "./actions.js";
 import type { SpineAction } from "./actions.js";
 import type { Executor } from "./executor.js";
@@ -45,6 +46,10 @@ export interface CreateSpineSessionArgs {
    *  see the header comment on why this is a user turn, not `systemPrompt`). */
   systemContext: string;
   executor: Executor;
+  /** The ticket this session is running for — used ONLY to self-compose
+   *  OTEL_RESOURCE_ATTRIBUTES (telemetry.ts's telemetryEnv()); never
+   *  forwarded into any prompt or tool. */
+  ticket: string;
 }
 
 // --- the streaming-input queue ------------------------------------------------
@@ -184,7 +189,7 @@ function buildTools(executor: Executor) {
 }
 
 export function createSpineSession(args: CreateSpineSessionArgs): SpineSession {
-  const { systemContext, executor } = args;
+  const { systemContext, executor, ticket } = args;
   const server = createSdkMcpServer({ name: "spine", version: "0.0.0", tools: buildTools(executor) });
   const { iterable, push, end } = createUserQueue();
 
@@ -218,7 +223,9 @@ export function createSpineSession(args: CreateSpineSessionArgs): SpineSession {
     // Lets spine/repl.ts render the assistant's text live via stream_event /
     // content_block_delta text_delta events (confirmed SDK fact).
     includePartialMessages: true,
-    env: process.env as Record<string, string | undefined>,
+    // Self-derived from the caller's own ticket value (never a forwarded
+    // string) — see telemetry.ts's header.
+    env: telemetryEnv(ticket, "spine"),
     stderr: (d: string) => process.stderr.write(d),
   };
 

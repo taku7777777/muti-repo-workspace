@@ -25,6 +25,7 @@ import { setupWorktree } from "../multi/worktree.js";
 import { commitAll, revParseHead } from "../gitops.js";
 import { runAgentQuery } from "../sdk.js";
 import { editSessionOptions } from "../steps.js";
+import { telemetryEnv } from "../telemetry.js";
 import { testGate } from "../gates.js";
 import { WorkerRequestSchema } from "./protocol.js";
 import type { WorkerRequest, WorkerResponse } from "./protocol.js";
@@ -153,7 +154,15 @@ async function handleEditStep(
   else signal.addEventListener("abort", () => ac.abort());
 
   try {
-    await runAgentQuery(req.prompt, { ...editSessionOptions(repoDir, kind), abortController: ac });
+    // req.ticket is zod-validated by WorkerRequestSchema's BARE_NAME
+    // (protocol.ts) — the most-trusted ticket value available at this call
+    // site, so telemetry is self-derived from it rather than trusting any
+    // string the orchestrator's prompt might otherwise carry.
+    await runAgentQuery(req.prompt, {
+      ...editSessionOptions(repoDir, kind),
+      env: telemetryEnv(req.ticket, "worker"),
+      abortController: ac,
+    });
   } catch (e) {
     return { ok: false, code: "step_failed", error: (e as Error).message };
   }

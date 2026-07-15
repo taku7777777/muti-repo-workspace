@@ -191,7 +191,7 @@ export async function cli(): Promise<number> {
     repos: repoList,
     initialInstruction: args.instruction,
   });
-  const session = createSpineSession({ systemContext, executor });
+  const session = createSpineSession({ systemContext, executor, ticket: args.ticket });
 
   await repl.run({
     session,

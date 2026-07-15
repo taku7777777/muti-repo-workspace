@@ -132,6 +132,82 @@ Phase 0 self-check):
    agent-roles.md, egress-selfcheck-per-role.md, and the READMEs) is the M4
    finalization itself.
 
+9. ~~The reviewer-enabled live publish (the one scene M3 had left
+   unexercised)~~ **DONE 2026-07-15** — ticket DEMO-6 on phase2-demo, driven
+   end-to-end through the M2 chat surface (`npm run chat`) on the split
+   topology, with the broker booted with
+   `REVIEWER_SOCKET=/run/reviewer/review.sock`. One run exercised every
+   layer of the final topology in sequence: plan consultation at the spine
+   gate (the orchestrator asked format/precedence questions and waited for
+   the human's answers), implement + tests over the worker RPC, read-only
+   review, `request_publish` passing the ledger invariants (testGreen.sha ==
+   reviewApproved.sha == headSha), the broker re-deriving ground truth and
+   consulting the reviewer on its OWN diff — the **`advisory reviewer:
+   approve — …` line rendered above the full diff at the sha-typed gate**
+   for the first time in a real publish — and the typed sha pushing exactly
+   `6257bb9` and opening phase2-demo#3. The remote ref matches the approved
+   sha.
+
+10. Per-ticket OTEL telemetry (workspace/work_type/role attribution) —
+   **BUILT + LIVE-VALIDATED 2026-07-15**. Closes the gap that the
+   containerized coder path (worker/orchestrator/reviewer) sent NO telemetry
+   at all: SDK sessions deliberately don't read user settings
+   (`settingSources` excludes `'user'`), and the `caged` network is
+   `internal: true` with no route to the host collector. Fix: a SECOND,
+   deliberately-opened `internal: true` network, `mrw-telemetry` (external,
+   created idempotently by `scripts/devcontainer-up.sh`), reaching **ONLY**
+   the sibling `claude-code-monitoring` stack's `otel-collector` service —
+   no new internet route, same fail-closed-by-topology primitive as `caged`.
+   Only the worker, orchestrator, and reviewer join it; **the broker and
+   egress-proxy deliberately do NOT** — telemetry attribution is a
+   coder-session concern, not a publish-path one, and the broker/proxy stay
+   exactly as trusted/minimal as before. Attribution is propagated by
+   SELF-DERIVATION, never by forwarding a wire string: each session composes
+   its own `OTEL_RESOURCE_ATTRIBUTES` from a ticket value it already trusts
+   by construction (`harness/src/telemetry.ts`'s `ticketFromRepoDir()` /
+   `telemetryEnv()`, mirrored locally in `broker/src/config.ts`'s
+   `ticketFromWorktreesRoot()` and `reviewer/src/sdk.ts`'s
+   `reviewerTelemetryEnv()` — three separate packages/images, no shared
+   import). The scheme is `workspace=<ticket-or-"unlabeled">,work_type=<
+   MRW_WORK_TYPE override, default "feature">,role=<worker|plan|review|spine|
+   reviewer>`; any value outside a bare-name charset (letters/digits/`._-`)
+   is rejected rather than sanitized-by-stripping, degrading to `unlabeled`/
+   `feature` instead of risking a value that could break the `k=v,k=v`
+   attribute syntax or collide with another ticket's. **Fail-open by
+   design** (the opposite posture from the publish path): if the collector
+   is absent, OTLP export silently no-ops rather than blocking or slowing a
+   step. **Accepted risk**: any of the three telemetry-joined cages could
+   send fake data into, or flood, the local collector/Loki — accepted
+   because the blast radius is a local monitoring stack, not the internet
+   or the publish path. Also threaded: the broker's advisory reviewer
+   consult (`broker/src/reviewer.ts`) now includes an optional `ticket`
+   field in its request to the reviewer (`reviewer/src/types.ts`'s
+   `ReviewerRequestSchema`, `.strict()`-preserved, same bare-name regex),
+   derived from the broker's OWN env, never the coder's request — so
+   role=reviewer sessions attribute to the right ticket too. Static
+   validation: `harness/test/telemetry.test.ts` (new, `ticketFromRepoDir`/
+   `telemetryEnv` accept/reject) and `reviewer/test/types.test.ts` (new —
+   the reviewer package had no test infra before this; wired with `tsx`,
+   already a devDependency, via the same `node --import tsx --test` pattern
+   `harness/` uses) both green, `harness`/`broker`/`reviewer` all typecheck
+   clean, `docker compose config -q` resolves the new `external: true`
+   network. `broker/src/config.ts`'s `ticketFromWorktreesRoot()` has no
+   package test infra to attach to (per M4's existing broker/reviewer test
+   gap) and is left to live verification, same as the rest of `broker/`.
+   Live-validated 2026-07-15 (with the companion `claude-code-monitoring`
+   change dual-homing its `otel-collector` onto `mrw-telemetry`): from
+   inside the worker cage, direct internet stays blocked and `loki`/
+   `grafana` stay unresolvable while `otel-collector:4318` answers — the
+   cage gained exactly one reachable host; both role self-checks stay
+   green. A DEMO-7 plan run (driver, declined at the gate), a worker-RPC
+   implement, and a reviewer socket probe carrying `ticket: "DEMO-7"` all
+   landed in Loki as `{workspace="DEMO-7", work_type="feature"}`
+   `api_request` streams, separable by structured-metadata `role` filters
+   (`| role="plan"` 14, `| role="worker"` 9, `| role="reviewer"` 4 entries;
+   role=spine uses the identical mechanism and will show at the next chat
+   run). Fail-open verified: with the collector STOPPED, a full drive run
+   completed normally with zero OTLP error lines in its output.
+
 M1 first-boot friction found and fixed (all live, none static):
 - A named volume layered over the `:ro` harness bind initializes from the
   HOST's `node_modules` (darwin binaries, host-uid ownership) → `npm ci`
@@ -191,6 +267,15 @@ cannot surface):
   has shipped, the stored instruction still sticks (unchanged behavior) and
   the driver only warns. `rm -rf tasks/<ticket>` is no longer required to
   correct an instruction before anything has published.
+- DEMO-6 finding (open, low): `diffTouchesTests()`'s patterns (`*.test.*`,
+  `tests/` directories, jest/vitest/mocha/playwright configs, `package.json`
+  "test"-script edits) do NOT match a root-level bare `test.js` — the DEMO-6
+  diff added assertions to phase2-demo's `test.js` and the "change touches
+  test files" caveat gate never fired before the publish gate. Harmless in
+  this run (the human and the advisory reviewer both saw the test change in
+  the diff, and the reviewer explicitly judged it non-tampering), but the
+  pattern should also match bare `test(s).<ext>` / `test_*` files at any
+  depth.
 - Zod v4's `z.toJSONSchema()` stamps the draft 2020-12 meta-schema ref, which the
   bundled Claude Code CLI's ajv (draft-07) cannot resolve — fixed with
   `target: "draft-7"` in `harness/src/sdk.ts`.

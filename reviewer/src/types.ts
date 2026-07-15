@@ -33,6 +33,16 @@ export const ReviewerRequestSchema = z
     // can reason about it, but handler.ts's prompt labels it explicitly as
     // DATA, never as instructions — see the prompt-injection note there.
     untrustedBody: z.string().max(64 * 1024),
+    // OPTIONAL — the ticket the broker derived from ITS OWN env
+    // (broker/src/config.ts's ticketFromWorktreesRoot(), never anything the
+    // coder's publish request carried). Used ONLY to attribute this
+    // session's OTEL telemetry (workspace=<ticket>); never fed into the
+    // review prompt itself. Same bare-name shape as the broker/worker
+    // ticket fields elsewhere in the repo.
+    ticket: z
+      .string()
+      .regex(/^[A-Za-z0-9._-]{1,100}$/)
+      .optional(),
   })
   .strict()
   .refine((v) => (v.diffPath !== undefined) !== (v.diffInline !== undefined), {

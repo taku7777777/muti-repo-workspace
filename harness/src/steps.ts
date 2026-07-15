@@ -132,7 +132,9 @@ export async function runImplement(
         preset: "claude_code",
         append: "Implement the plan by editing files. Do not push or publish.",
       },
-      // Edit-capable, but no network tools (there is no egress for them anyway).
+      // Edit-capable, but no network tools. (WebFetch is dead anyway — no
+      // egress; WebSearch runs server-side via the API, so this deny is the
+      // actual control for it — see DENY_ALWAYS in sdk.ts.)
       tools: EDIT_TOOLS,
       disallowedTools: DENY_ALWAYS,
       maxTurns: 80,

@@ -37,6 +37,10 @@ Phase 0 self-check):
 3. Phase 2: `export BROKER_GITHUB_TOKEN=…`, edit `config/broker-policy.json`, and
    drive one publish through the broker (see [devcontainer-phase2.md](devcontainer-phase2.md)).
 4. Phase 3: run one multi-repo ticket (see [devcontainer-phase3.md](devcontainer-phase3.md)).
+5. First role-split increment (after 3–4): a **read-only judge container**
+   (source `:ro`, anthropic-only egress) running PLAN and REVIEW — upgrades
+   review independence from app-layer tool scoping to an OS boundary. See
+   [agent-roles.md](agent-roles.md) § Adoption order.
 
 First-boot friction found and fixed (exactly the class of issue static checks
 cannot surface):

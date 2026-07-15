@@ -175,6 +175,19 @@ not shared across tickets. Sharing one long-lived container across tickets would
 back onto fail-open directory ACLs — both rejected. Cost is controlled by
 templating the role image and throwing instances away, not by pooling.
 
+**Adoption order (agreed 2026-07-15):** the first concrete increment after the
+Phase 2/3 live validations is a **read-only judge container** — source mounted
+`:ro`, `api.anthropic.com`-only egress — running the harness PLAN and REVIEW
+steps. Plan and Review land in the *same* cell of the boundary matrix (write
+`none` × egress anthropic-only), so **one profile serves both** — splitting
+per-step would be splitting too finely. This upgrades review independence from
+app-layer tool scoping (`tools`/`disallowedTools`) to an OS boundary; Implement
+stays in today's coder container (its cell is unchanged, and its containment
+never rested on tool scoping). Further role splits (Documenter / Researcher /
+Reporter) wait for the dispatch control plane
+([agent-dispatch.md](agent-dispatch.md)) — cross-container handoffs must be
+typed and dispatcher-mediated before more roles exist.
+
 ## Open questions / next steps
 
 1. **Reviewer vs Researcher overlap:** both are `write:none`. Keep separate

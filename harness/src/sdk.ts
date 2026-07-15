@@ -41,8 +41,13 @@ export const MAX_FIX_ATTEMPTS =
 // wins even under bypass). Read-only steps get no mutation/network tools at all.
 export const READ_ONLY_TOOLS = ["Read", "Grep", "Glob"];
 export const EDIT_TOOLS = ["Read", "Grep", "Glob", "Edit", "Write", "Bash"];
-// Never wanted by any step (no network egress is allowlisted for the coder, and
-// notebook edits are out of scope). Denied everywhere as defense in depth.
+// Never wanted by any step. NOTE the denials are NOT equivalent in weight:
+//  - WebFetch fetches CLIENT-SIDE, so the caged network already blocks it —
+//    this deny is defense in depth / role semantics.
+//  - WebSearch executes SERVER-SIDE via api.anthropic.com (an allowlisted
+//    host), so the network boundary CANNOT block it. This deny is the ONLY
+//    control — a load-bearing app-layer rule until Phase 4 L7 egress
+//    hardening can enforce it at the proxy.
 export const DENY_ALWAYS = ["WebFetch", "WebSearch", "NotebookEdit"];
 export const DENY_MUTATION = ["Edit", "Write", "Bash", "NotebookEdit", "WebFetch", "WebSearch"];
 

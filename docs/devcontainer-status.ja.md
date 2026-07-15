@@ -37,6 +37,10 @@ credential 不在のアサーションは Phase 0 セルフチェックで live 
 3. Phase 2: `export BROKER_GITHUB_TOKEN=…`、`config/broker-policy.json` を編集し、
    broker 経由で publish を1回通す([devcontainer-phase2.md](devcontainer-phase2.md) 参照)。
 4. Phase 3: マルチリポジトリのチケットを1つ走らせる([devcontainer-phase3.md](devcontainer-phase3.md) 参照)。
+5. 最初の役割分割の増分(3–4 の後): **読み取り専用ジャッジコンテナ**(ソース `:ro`、
+   egress は anthropic のみ)で PLAN と REVIEW を走らせる — レビューの独立性を
+   アプリ層のツール制御から OS 境界に格上げする。
+   [agent-roles.md](agent-roles.md) の「採用順序」参照。
 
 実際に見つかり修正した初回 boot の摩擦(まさに静的チェックでは表面化しない類):
 - bind mount された `harness/node_modules` が macOS(darwin-arm64)の esbuild バイナリを

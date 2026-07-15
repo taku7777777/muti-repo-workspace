@@ -68,14 +68,34 @@ export function createRepl(): ReplIO {
   // EOF-is-decline (mirrors gates.ts's humanApproval fix): race the question
   // against the interface's own 'close' event resolving "" — if stdin closes
   // before an answer arrives, this resolves "" instead of hanging forever.
+  //
+  // Unlike gates.ts (which creates a FRESH readline per gate), this repl
+  // shares ONE interface across the whole session, so the close listener must
+  // be REMOVED once the question resolves normally — a bare `rl.once("close")`
+  // per prompt accumulates one dead listener per input line and trips
+  // MaxListenersExceededWarning after 10 (observed live in the first
+  // interactive DEMO-5 session).
   function askLine(prompt: string): Promise<string> {
     if (closed) return Promise.resolve("");
-    return withLock(() =>
-      Promise.race([
-        rl.question(prompt),
-        new Promise<string>((resolve) => rl.once("close", () => resolve(""))),
-      ]),
-    );
+    return withLock(() => {
+      if (closed) return Promise.resolve("");
+      return new Promise<string>((resolve) => {
+        const onClose = () => resolve("");
+        rl.once("close", onClose);
+        rl.question(prompt).then(
+          (answer) => {
+            rl.removeListener("close", onClose);
+            resolve(answer);
+          },
+          () => {
+            // A rejected question (interface torn down mid-prompt) is the
+            // same fail-closed outcome as EOF.
+            rl.removeListener("close", onClose);
+            resolve("");
+          },
+        );
+      });
+    });
   }
 
   const askHuman = async (question: string): Promise<string> => {

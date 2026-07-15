@@ -114,6 +114,21 @@ claude
   編集はできない(denyWrite)スクリプトです。pre-push フックが push 先を
   `allowed_push_orgs` に制限します。
 
+## コンテナ化された経路
+
+上記の macOS/cmux ワークフローと並行して、本リポジトリには役割ごとの macOS
+サンドボックスを役割ごとのコンテナで置き換える Linux devcontainer 経路
+(`harness/`、`broker/`、`reviewer/`、`.devcontainer/`)もあります: **worker**
+(コードを編集。broker ソケットなし — publish を依頼することすらできない)、
+**orchestrator**(ワークスペースマウントは `:ro`。coded spine + レールの上を走る
+Agent SDK セッションを実行。`npm run chat` が対話的なエントリポイント)、
+**broker**(唯一のトークン保持者 — 人間ゲート付き、ground truth を描画した
+publish)、そして**助言 reviewer**(独立コンテナ、LLM フリーの broker、publish
+ゲートでの任意の型付き verdict 1つ)。Phase 0–3 と M1–M3 はすべて実機で稼働
+済みです — 設計とビルド記録は
+[`docs/agent-orchestration.md`](docs/agent-orchestration.md) と
+[`docs/devcontainer-status.md`](docs/devcontainer-status.md) を参照してください。
+
 詳細: [`docs/architecture.md`](docs/architecture.md),
 [`docs/handoff-protocol.md`](docs/handoff-protocol.md),
 [`docs/settings-reference/`](docs/settings-reference/),

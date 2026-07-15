@@ -1,6 +1,21 @@
 # Per-role egress self-check (design memo)
 
-**Status: DESIGN, not built.** Companion to [agent-roles.md](agent-roles.md).
+**Status: DESIGN, not built** for the general per-role manifest design below —
+but the worker/orchestrator split it anticipated is now real. See
+[agent-orchestration.md](agent-orchestration.md) / M1
+([devcontainer-status.md](devcontainer-status.md) item 5): both the `worker`
+and `orchestrator` containers run their own role self-check
+(`scripts/egress-selfcheck-role.sh`, `ROLE=worker|orchestrator`), layered on
+top of the base Phase 0 `egress-selfcheck.sh` in both cages — it asserts the
+mount/socket boundaries this M1 split depends on (worker: no broker socket,
+cannot write `repositories/`/`harness/`; orchestrator: the entire workspace
+mount is `:ro`, holds both the broker and worker-RPC sockets). The M3 broker-side
+reviewer container currently **shares the coder allowlist** (same `caged`
+network, same egress-proxy, same `api.anthropic.com` + npm registry allowlist)
+rather than getting a tighter one of its own — a reviewer-specific,
+`docker/egress/roles/reviewer.allow`-style allowlist (and the general
+per-role manifest generalization this memo designs) remain this doc's
+Phase-4 scope, not yet built. Companion to [agent-roles.md](agent-roles.md).
 Today `scripts/egress-selfcheck.sh` proves *one* boundary — the caged coder
 (nothing reachable but the allowlist; no proxy-bypass route; no DNS; no docker
 socket; no push credential). Once roles gain distinct egress

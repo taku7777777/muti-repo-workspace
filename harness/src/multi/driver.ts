@@ -91,6 +91,33 @@ export function parseArgs(argv: string[]): DriverArgs {
 }
 
 // ---------------------------------------------------------------------------
+// resume instruction policy
+// ---------------------------------------------------------------------------
+/**
+ * resolveResumedInstruction — decide whether a resumed run should ADOPT a
+ * newly-given instruction or keep the one already stored in ticket state.
+ *
+ * PURE (no I/O): given the loaded state and the instruction the caller passed
+ * on THIS invocation, decide whether to switch. Adoption is safe exactly when
+ * nothing has shipped yet for this ticket — once any repo's outcome is
+ * "published", the stored instruction must stick (a later repo pursuing
+ * different work than an already-published one would make the ticket's
+ * history inconsistent with what shipped). Before that point, a corrected
+ * instruction should just take effect on the next run instead of forcing
+ * `rm -rf tasks/<ticket>` to start over (the open Phase 3 finding this fixes).
+ */
+export function resolveResumedInstruction(
+  state: TicketState,
+  given: string,
+): { instruction: string; adopted: boolean } {
+  const nothingPublishedYet = !Object.values(state.repos).some((r) => r.outcome === "published");
+  if (given && given !== state.instruction && nothingPublishedYet) {
+    return { instruction: given, adopted: true };
+  }
+  return { instruction: state.instruction, adopted: false };
+}
+
+// ---------------------------------------------------------------------------
 // combined views
 // ---------------------------------------------------------------------------
 function renderCombinedPlan(ticket: string, items: WorkItem[]): void {
@@ -220,12 +247,19 @@ export async function runDriver(args: DriverArgs): Promise<number> {
       updatedAt: new Date().toISOString(),
     };
     saveState(root, args.ticket, state);
-  } else if (state.instruction !== args.instruction) {
-    console.warn(
-      `[driver] resuming ticket ${args.ticket}; the stored instruction differs from the one given.\n` +
-        `         stored:  ${state.instruction}\n         given:   ${args.instruction}\n` +
-        `         Keeping the stored instruction for consistency with already-published repos.`,
-    );
+  } else {
+    const resolved = resolveResumedInstruction(state, args.instruction);
+    if (resolved.adopted) {
+      state.instruction = resolved.instruction;
+      saveState(root, args.ticket, state);
+      console.log(`[driver] adopting the new instruction (nothing published yet)`);
+    } else if (state.instruction !== args.instruction) {
+      console.warn(
+        `[driver] resuming ticket ${args.ticket}; the stored instruction differs from the one given.\n` +
+          `         stored:  ${state.instruction}\n         given:   ${args.instruction}\n` +
+          `         Keeping the stored instruction for consistency with already-published repos.`,
+      );
+    }
   }
   const instruction = state.instruction;
 

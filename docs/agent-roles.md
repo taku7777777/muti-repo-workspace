@@ -188,6 +188,11 @@ Reporter) wait for the dispatch control plane
 ([agent-dispatch.md](agent-dispatch.md)) — cross-container handoffs must be
 typed and dispatcher-mediated before more roles exist.
 
+(2026-07-15: BUILT — see devcontainer-status.md items 5–7. The orchestrator
+container realizes the judge cell; the worker realizes the Coder cell; the
+broker-side advisory reviewer is a second, trusted-side instance of the
+Reviewer cell fed exclusively by broker-rendered ground truth.)
+
 ## Open questions / next steps
 
 1. **Reviewer vs Researcher overlap:** both are `write:none`. Keep separate

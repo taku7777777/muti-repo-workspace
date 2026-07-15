@@ -179,6 +179,11 @@ Plan と Review は boundary matrix の*同じ*セル(write `none` × egress ant
 ([agent-dispatch.md](agent-dispatch.md))を待つ — コンテナ間ハンドオフが型付きかつ
 dispatcher 仲介になる前に、役割を増やしてはならない。
 
+(2026-07-15: 実装済み — devcontainer-status.md の項目5–7を参照。orchestrator
+コンテナがジャッジセルを、worker が Coder セルを実現する。broker 側の助言
+reviewer は、broker が描画した ground truth のみを与えられる、trusted 側の
+Reviewer セルの2つ目のインスタンスである。)
+
 ## 未解決の論点 / 次の一手
 
 1. **Reviewer と Researcher の重なり:** どちらも `write:none`。別役割に保つ

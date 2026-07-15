@@ -158,50 +158,81 @@ closing this means running the scripts inside the sandbox with a scoped egress
 instead of excluding them (needs runtime validation that push still works).
 See [settings-reference/orchestrator.md](settings-reference/orchestrator.md).
 
-## The containerized execution flow (Phases 0–3, live-validated)
+## The containerized execution flow (Phases 0–3 + M1–M3, live-validated)
 
 The container path replaces the macOS sandbox with a Linux network-namespace
-boundary. All four phases have run live — see
-[devcontainer-status.md](devcontainer-status.md) for the run records. One
-diagram summarizes who does what and what crosses each boundary:
+boundary. Phases 0–3 proved the flow with one coder container; M1–M3
+([agent-orchestration.md](agent-orchestration.md)) then split that coder into
+an orchestrator + worker pair and moved judgment from a coded state machine
+into an LLM session running on rails. All of it has run live — see
+[devcontainer-status.md](devcontainer-status.md) items 5–7 for the run
+records. One diagram summarizes who does what and what crosses each boundary:
 
 ```
-[coder devcontainer — caged network, no route out except the proxy]
-harness (a deterministic state machine — a program, NOT an LLM)
-  ├─ PLAN      … read-only LLM session ──────┐
-  ├─ IMPLEMENT … edit-capable LLM session     ├─ every LLM turn goes through
-  ├─ REVIEW    … read-only LLM session        │  egress-proxy (Squid allowlist)
-  │              (a FRESH session — never     │  to api.anthropic.com ONLY
-  │               the one that wrote the code)┘
-  ├─ TEST GATE … machine judgment (exit code === 0; never a model claim)
-  ├─ human gate ① (approve plan)  ② (approve publish) … via the terminal
+[worker container — tasks/ rw only, harness/repositories :ro, NO broker socket]
+  workerd RPC daemon (harness/src/workerd/) — one newline-JSON unix socket
+  ├─ setup_worktree … clone/sparse checkout the repo
+  ├─ run_implement / run_fix … edit-capable LLM session, ONE per instruction
+  └─ run_tests … machine judgment (exit code === 0; never a model claim)
+  every step ends in a DETERMINISTIC commit (mrw:-prefixed) — the worktree is
+  always clean; the worker cannot even request a publish (no broker socket)
+        ▲ typed request/response, newline-JSON            │ egress-proxy
+        │ over a unix socket (workerd protocol)            (Squid allowlist)
+        │                                                   to api.anthropic.com
+[orchestrator container — whole workspace :ro, holds broker + worker sockets]
+  coded spine (harness/src/spine/) — invariant ledger + typed action executor
+  ├─ orchestrator LLM session … proposes ONE typed action at a time via
+  │  in-process MCP tools (run_worker / run_tests / review_diff / plan_repo /
+  │  ask_human / show_human / request_publish / done / abort)
+  ├─ PLAN / REVIEW … read-only LLM sessions, read the :ro workspace mount
+  ├─ commitRangeDiff(baseSha, HEAD) … the ONLY diff any step sees (gitops.ts,
+  │  a pure read of git objects — works on :ro because the worker already
+  │  committed deterministically)
+  ├─ ledger gate: request_publish only fires when plan + tests-green +
+  │  review-approved ALL attest the CURRENT HEAD sha
+  ├─ human gate (via the spine's one owned terminal — `npm run chat`, or the
+  │  classic `npm run orchestrate`/`npm run drive` flows on the same
+  │  primitives)
   └─ publish INTENT over a unix socket ──▶ [broker container — egress network]
                                               ├─ re-derives GROUND TRUTH itself
                                               │  (diff/URL/sha from git objects +
                                               │   its own baked policy — the
                                               │   coder's words are never trusted)
+                                              ├─ optional advisory consult ──▶ [reviewer
+                                              │  (diff in, verdict out,        container —
+                                              │  120s budget, tri-state:       write:none,
+                                              │  off / no-verdict / verdict)   broker-fed only]
                                               ├─ policy check (host/org/branch)
-                                              ├─ human gate ③ (type the sha)
+                                              ├─ human gate (type the sha) — sees the
+                                              │  ground-truth diff AND the reviewer verdict
                                               └─ push + gh pr create
         typed response (sha/PR, or one of ────┘   (the ONLY token holder)
         ~20 fail-closed failure codes)
-harness reads the response and decides what happens next
+the orchestrator reads the response and decides what happens next
 (multi-repo driver: update the ledger, advance to the next repo or stop)
 ```
 
 Three distinctions that make the flow trustworthy:
 
 1. **Checks have three different owners.** The diff REVIEW is an independent
-   LLM (advisory, never decisive); the TEST GATE is a machine (exit code only);
-   the two in-coder approval gates plus the broker's sha-typed gate are humans.
-   Humans hold minimal but decisive touchpoints.
+   LLM (advisory, never decisive) — both the in-orchestrator REVIEW step and
+   the broker-side reviewer; the TEST GATE is a machine (exit code only); the
+   human gates (in the orchestrator's dialogue, plus the broker's sha-typed
+   gate) are humans. Humans hold minimal but decisive touchpoints.
 2. **The broker does not act on what the coder says.** The intent is a typed
    *wish* (`{repo, branch, title, body}`); everything that matters — the diff
    the human approves, the push URL, the sha — is re-derived on the trusted
-   side from git objects and the baked policy file.
+   side from git objects and the baked policy file. The broker-side reviewer
+   sees only this re-derived ground truth, never the worker's own words.
 3. **Every failure means "not published."** The broker's response is typed;
    any non-ok code (declined, dirty_worktree, sha_changed, …) is fail-closed,
-   so the harness can build sequencing on top of it safely.
+   so the orchestrator can build sequencing on top of it safely.
+
+Single-container fallback is kept, not just historical: with `WORKERD_SOCKET`
+unset, every effectful step (`exec.ts`'s mode switch) runs in-process instead
+of over RPC, using the same primitives and the same deterministic-commit /
+`commitRangeDiff` semantics — so the split topology above and the original
+Phase 0–3 single-coder path are one codebase, not two.
 
 ## Configuration model
 

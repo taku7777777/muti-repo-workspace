@@ -5,8 +5,11 @@
 # the coder ONLY through the shared unix socket (a Docker named volume).
 #
 # It shares the coder image's base (Node 20 + a non-root `node` user + git), and
-# adds the GitHub CLI. Broker npm deps (zod, tsx, typescript) are installed at
-# BUILD time; the broker's TypeScript source is bind-mounted read-only at runtime.
+# adds the GitHub CLI. EVERYTHING the broker executes is baked in at BUILD time —
+# npm deps (zod, tsx, typescript), the policy, AND the TypeScript source. Nothing
+# the runtime coder can write (the /workspaces tree, incl. broker/src on the host)
+# influences broker execution; changing broker code requires an image rebuild,
+# which is a trusted, human-initiated moment.
 FROM mcr.microsoft.com/devcontainers/typescript-node:20
 
 # --- GitHub CLI (for `gh pr create`) ---
@@ -24,10 +27,18 @@ RUN apt-get update \
 
 ENV DISABLE_AUTOUPDATER=1
 
-# --- Broker dependencies (build time; src is bind-mounted at runtime) ---
+# --- Broker dependencies (build time) ---
 WORKDIR /broker
 COPY broker/package.json broker/package-lock.json ./
 RUN npm ci
+
+# --- Broker SOURCE, baked in at build (same reasoning as the policy below).
+#     Previously bind-mounted :ro from ../broker/src — but that host path lives
+#     inside the coder-writable workspace tree, so a prompt-injected coder could
+#     tamper the source and have it execute (with the token) on the next broker
+#     restart. Baking closes that restart-time supply path. ---
+COPY broker/tsconfig.json ./tsconfig.json
+COPY broker/src ./src
 
 # --- TRUSTED policy, baked in at build (a trusted moment) so the RUNTIME coder
 #     cannot alter it. Root-owned + world-read: the broker reads it, no one in the
@@ -38,9 +49,11 @@ RUN install -d -m 0755 /etc/mrw-broker
 COPY config/broker-policy.json /etc/mrw-broker/policy.json
 RUN chmod 0444 /etc/mrw-broker/policy.json
 
-# The `node` user runs the broker and needs to write the tsx cache under /broker
-# (the bind-mounted src/ stays read-only). The baked policy in /etc stays root-owned.
-RUN chown -R node:node /broker
+# The `node` user runs the broker and needs to write the tsx cache under /broker.
+# The baked src is then stripped of write bits (read-only even inside the
+# container); the baked policy in /etc stays root-owned.
+RUN chown -R node:node /broker \
+ && chmod -R a-w /broker/src /broker/tsconfig.json
 
 # Socket dir must be node-owned BEFORE the fresh `broker-sock` named volume mounts
 # over it: an empty named volume inherits the mountpoint's ownership, and Docker

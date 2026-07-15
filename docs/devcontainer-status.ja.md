@@ -53,6 +53,16 @@ credential 不在のアサーションは Phase 0 セルフチェックで live 
    アプリ層のツール制御から OS 境界に格上げする。
    [agent-roles.md](agent-roles.md) の「採用順序」参照。
 
+live 実行後の堅牢化(実行後の設計ウォークスルーで発見、**2026-07-15 修正済み**):
+broker の*ソースコード*が、coder の書けるツリーから読まれる最後の実行時入力だった —
+依存と policy はイメージに焼き込み済みだったが、`npm start` は `../broker/src` から
+`:ro` で bind マウントされた `/broker/src` を実行しており、そのホスト側パスは coder が
+RW でマウントするワークスペースツリーの中にある。したがってプロンプトインジェクション
+された coder が broker のコードを改ざんし、次回の broker 再起動時に(トークン付きで)
+実行させることが可能だった。修正: `broker/src` + `tsconfig.json` をイメージに焼き込み
+(書き込みビット除去)、マウントを撤去 — broker が実行するものはすべて、ビルドという
+人間起点の信頼された瞬間に固定されるようになった。
+
 実際に見つかり修正した初回 boot の摩擦(まさに静的チェックでは表面化しない類):
 - bind mount された `harness/node_modules` が macOS(darwin-arm64)の esbuild バイナリを
   Linux コンテナに持ち込んだ — VS Code devcontainer フローではなく `docker compose exec`

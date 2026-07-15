@@ -73,6 +73,9 @@
       "Edit(/repositories/**)",
       "Edit(/.claude/**)",
       "Edit(~/.claude.json)"
+    ],
+    "additionalDirectories": [
+      "{{STATE_ROOT}}"
     ]
   }
 }

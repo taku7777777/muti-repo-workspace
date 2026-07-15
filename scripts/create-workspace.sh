@@ -306,6 +306,15 @@ phase_finalize() {
   cp -R "$WORKSPACE_ROOT/templates/task-orchestrator/skills/." \
     "$TASK_DIR/agents/orchestrator/.claude/skills/"
   find "$TASK_DIR/agents/orchestrator/.claude/skills" -name '*.sh' -exec chmod +x {} +
+  # Bake the tool_home hint into add-repository.sh so it can locate
+  # scripts/lib/common.sh on the native path when state_root is externalized
+  # (TASK_DIR/../.. there is state_root, not tool_home). WORKSPACE_ROOT is
+  # already exported above = tool_home.
+  _addrepo="$TASK_DIR/agents/orchestrator/.claude/skills/add-repository-to-worker/scripts/add-repository.sh"
+  if [ -f "$_addrepo" ]; then
+    _tmp="$(mktemp)"; render_template "$_addrepo" > "$_tmp" && mv "$_tmp" "$_addrepo"
+    chmod +x "$_addrepo"
+  fi
 
   # --- MCP -------------------------------------------------------------------
   if [ "$MCP_SERVERS_JSON" != "[]" ]; then

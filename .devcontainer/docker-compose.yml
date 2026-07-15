@@ -132,8 +132,10 @@ services:
       # mount from a host path OUTSIDE the workspace.
       BROKER_POLICY_FILE: /etc/mrw-broker/policy.json
       # The coder-writable worktrees the broker reads objects from (mounted :ro).
-      # Point at tasks/<TICKET>/repositories for per-ticket work.
-      BROKER_WORKTREES_DIR: /workspaces/muti-repo-workspace/repositories
+      # Overridable from the host shell — point at tasks/<TICKET>/repositories for
+      # per-ticket work (NOTE: repositories/ is mounted :ro in the CODER, so a
+      # coder-editable publish worktree must live under tasks/).
+      BROKER_WORKTREES_DIR: ${BROKER_WORKTREES_DIR:-/workspaces/muti-repo-workspace/repositories}
       # The coder-writable tree the policy file must never live inside (F2 check).
       BROKER_CODER_TREE: /workspaces/muti-repo-workspace
       BROKER_SOCKET_PATH: /run/broker/publish.sock

@@ -1,0 +1,23 @@
+{
+  "name": "mrw-advisory-reviewer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "M3 broker-side advisory reviewer — its own container/image. Reads a broker-rendered ground-truth diff (file or small inline payload) plus untrusted coder-authored title/body, runs ONE read-only, tool-less structured SDK session, and returns an advisory {verdict, notes}. Never gates the push: the broker's sha-typed human gate is authoritative regardless of what this returns or whether it answers at all.",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.205",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

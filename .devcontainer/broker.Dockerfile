@@ -60,7 +60,12 @@ RUN chown -R node:node /broker \
 # creates the mountpoint root:root 0755, so `node` binding the socket there would
 # get EACCES and the broker would exit(1). Pre-creating it node-owned makes the
 # fresh volume node-owned. (The coder side only needs traverse + the 0666 socket.)
-RUN install -d -o node -g node -m 0755 /run/broker
+#
+# /var/mrw/review-diffs (M3) is the SAME lesson applied to the `review-diffs`
+# named volume: the broker writes diff files here (rw) for the OPTIONAL
+# advisory reviewer to read (ro, see reviewer.Dockerfile) — pre-created
+# node-owned so the fresh volume mount doesn't leave it root:root 0755.
+RUN install -d -o node -g node -m 0755 /run/broker /var/mrw/review-diffs
 
 USER node
 CMD ["npm", "start"]

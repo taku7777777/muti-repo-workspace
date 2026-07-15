@@ -41,5 +41,11 @@
 /broker/dist/
 /.devcontainer/run-broker/
 
+# --- M3 advisory reviewer ---
+# Same reasoning as the broker above: build/runtime artifacts only, never the
+# source (which IS committed — reviewer/src, reviewer/package.json, etc.).
+/reviewer/node_modules/
+/reviewer/dist/
+
 # --- OS noise ---
 .DS_Store

@@ -13,7 +13,13 @@
  *   7. render GROUND TRUTH by FETCHING the branch from that constructed URL into a
  *      broker-private scratch repo and diffing the approved sha against the
  *      freshly-fetched ref (F3); fail-closed on any incompleteness;
- *   8. HUMAN approves at the broker, seeing the resolved target + sha (cancellable);
+ *   7.5. M3: OPTIONALLY consult the advisory reviewer with that SAME ground-truth
+ *      diff (broker/src/reviewer.ts) — the broker's only outbound typed call. ANY
+ *      failure (feature off, unreachable, timeout, malformed reply) yields a null
+ *      verdict and NEVER throws; it cannot block or fail a publish, only annotate
+ *      the human gate below;
+ *   8. HUMAN approves at the broker, seeing the resolved target + sha AND the
+ *      reviewer's verdict, if any (cancellable);
  *   9. F6: re-scan config, re-resolve+re-validate the target, re-confirm the sha —
  *      all IN-PROCESS, synchronously, immediately before push; any mismatch aborts;
  *  10. push the EXACT approved sha to the constructed URL from the scratch repo,
@@ -24,6 +30,7 @@ import * as path from "node:path";
 import { approveAtBroker } from "./approve.js";
 import { GITHUB_TOKEN, WORKTREES_ROOT, loadPolicy } from "./config.js";
 import type { Policy } from "./config.js";
+import { maybeConsultReviewer } from "./reviewer.js";
 import {
   canonicalHttpsUrl,
   coderObjectsDir,
@@ -161,6 +168,13 @@ export async function handleRequest(raw: unknown, signal?: AbortSignal): Promise
       return fail("nothing_to_publish", "no commits ahead of the remote — nothing to publish");
     }
 
+    // 7.5. Advisory reviewer consult (M3, optional). The broker stays
+    // LLM-free itself: this is one outbound typed socket call, given the
+    // SAME ground-truth diff the human is about to see — never the coder's
+    // words. Any failure (env unset, unreachable, timeout, malformed reply)
+    // returns null; this call NEVER throws into the publish path.
+    const reviewerVerdict = await maybeConsultReviewer(render.diff, req.title, req.body, signal);
+
     // 8. Human gate (cancellable). No await between here and the push except this one.
     let approved: boolean;
     try {
@@ -179,6 +193,7 @@ export async function handleRequest(raw: unknown, signal?: AbortSignal): Promise
           commitList: render.commitList,
           diffStat: render.diffStat,
           diff: render.diff,
+          reviewerVerdict,
         },
         signal,
       );

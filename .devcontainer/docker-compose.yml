@@ -41,6 +41,12 @@ name: mrw-phase0
 # The worker and orchestrator share one image (coder.Dockerfile) but never share
 # a writable mount: the split is enforced by which named volumes/binds each
 # service lists, not by anything inside the image.
+#
+# M3 adds a 5th, OPTIONAL service:
+#   reviewer      caged, egress:anthropic-only (shared allowlist). Advisory-only
+#                 consult the broker may make before the human gate — never
+#                 depended-on, never load-bearing (see the `reviewer` and `broker`
+#                 service comments below, and broker/src/reviewer.ts).
 
 services:
   # --------------------------------------------------------------------------
@@ -266,6 +272,21 @@ services:
       BROKER_CODER_TREE: /workspaces/muti-repo-workspace
       BROKER_SOCKET_PATH: /run/broker/publish.sock
       GIT_TERMINAL_PROMPT: "0"
+      # M3 advisory reviewer — OPTIONAL. Null-value passthrough (bare key, no
+      # inline default) — SAME contract as CLAUDE_CODE_OAUTH_TOKEN/
+      # ANTHROPIC_API_KEY below in the worker/orchestrator blocks: unset on
+      # the host means this var is OMITTED from the container entirely, so
+      # `process.env.REVIEWER_SOCKET` reads undefined and
+      # broker/src/reviewer.ts's maybeConsultReviewer() returns null
+      # immediately — feature OFF, byte-identical to pre-M3 behavior. To
+      # enable: `REVIEWER_SOCKET=/run/reviewer/review.sock scripts/devcontainer-up.sh`.
+      REVIEWER_SOCKET:
+      # Where the broker WRITES large diff files for the reviewer to read
+      # (rw here, ro in the `reviewer` service below — see the `review-diffs`
+      # named volume). Has a sensible default (unlike REVIEWER_SOCKET) because
+      # writing here is harmless when the feature is off: nothing ever reads
+      # the directory if REVIEWER_SOCKET is unset.
+      REVIEWER_DIFF_DIR: /var/mrw/review-diffs
     # NOTE: intentionally NO `env_file: .env` here — the broker must not load the
     # coder's shared .env (which would also mean a token written there reaches the
     # coder). The token arrives via the `environment` interpolation above.
@@ -276,6 +297,13 @@ services:
       # tampered source execute with the token on the next broker restart.
       # The shared socket named volume (also mounted in the coder).
       - broker-sock:/run/broker
+      # M3: shared with the `reviewer` service. The broker holds the ONLY
+      # socket client (its own outbound call, see reviewer.ts) — the socket
+      # itself is opened by the reviewer process, not the broker.
+      - reviewer-sock:/run/reviewer
+      # M3: where the broker WRITES ground-truth diff files for the (OPTIONAL)
+      # reviewer to read — rw here, ro in `reviewer` below.
+      - review-diffs:/var/mrw/review-diffs
       # The coder-writable worktrees — READ-ONLY. The broker reads objects by sha;
       # it never writes here and never executes anything from here.
       - ..:/workspaces/muti-repo-workspace:ro
@@ -292,6 +320,86 @@ services:
       timeout: 3s
       retries: 12
       start_period: 5s
+    # NOTE: no `depends_on: reviewer` here, deliberately. The M3 advisory
+    # reviewer is OPTIONAL and fail-visible (broker/src/reviewer.ts): the
+    # broker must start and serve publish requests even if the reviewer
+    # image was never built, is unhealthy, or `docker compose stop reviewer`
+    # was run — every consult failure degrades to "no verdict" at the human
+    # gate, never to a blocked broker.
+    command: ["npm", "start"]
+
+  # --------------------------------------------------------------------------
+  # reviewer: the M3 advisory reviewer — an OPTIONAL, ADVISORY-ONLY consult
+  # the broker may make before the sha-typed human gate (see
+  # broker/src/reviewer.ts, broker/src/approve.ts, and
+  # docs/agent-orchestration.md's "Broker-side reviewer" section). It reads a
+  # broker-rendered ground-truth diff (file, ro mount, or a small inline
+  # payload) plus the coder's title/body (explicitly labeled UNTRUSTED in its
+  # own prompt) and returns a {verdict, notes} pair — nothing it says can
+  # force or block a publish. It holds NO GitHub token, NO git, NO gh, and no
+  # workspace mount: everything it runs is baked into the image (see
+  # reviewer.Dockerfile).
+  # --------------------------------------------------------------------------
+  reviewer:
+    build:
+      context: ..
+      dockerfile: .devcontainer/reviewer.Dockerfile
+    user: node
+    working_dir: /reviewer
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Same `caged` network as worker/orchestrator — i.e. the SAME baked-in
+    # allowlist (api.anthropic.com + registry.npmjs.org), enforced by the
+    # SAME egress-proxy. This is a real, stated caveat: a reviewer-specific,
+    # tighter allowlist (e.g. api.anthropic.com only, no npm) is Phase 4
+    # work — see docs/egress-selfcheck-per-role.md's per-role manifest
+    # design (`docker/egress/roles/reviewer.allow`, not yet built). Today the
+    # reviewer is merely CONFINED to the same shared allowlist as every other
+    # caged role, not given its own tighter one.
+    networks:
+      - caged
+    environment:
+      HTTP_PROXY: http://egress-proxy:3128
+      HTTPS_PROXY: http://egress-proxy:3128
+      http_proxy: http://egress-proxy:3128
+      https_proxy: http://egress-proxy:3128
+      NO_PROXY: localhost,127.0.0.1,::1,egress-proxy
+      no_proxy: localhost,127.0.0.1,::1,egress-proxy
+      DISABLE_AUTOUPDATER: "1"
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+      REVIEWER_SOCKET_PATH: /run/reviewer/review.sock
+      REVIEWER_DIFF_DIR: /var/mrw/review-diffs
+      # Anthropic auth — same null-value-passthrough contract as the worker/
+      # orchestrator: unset on the host means OMITTED from this container.
+      CLAUDE_CODE_OAUTH_TOKEN:
+      ANTHROPIC_API_KEY:
+    volumes:
+      # NOTE: the reviewer's source is NOT mounted — baked into the image at
+      # build (see reviewer.Dockerfile), same supply-chain reasoning as the
+      # broker's src.
+      # Shared with the broker — the broker is the ONLY client; this process
+      # opens (listens on) the socket.
+      - reviewer-sock:/run/reviewer
+      # The broker WRITES diff files here; the reviewer only ever READS them
+      # — mounted read-only so a compromised reviewer session (it has no
+      # tools, but defense in depth) cannot tamper with what a LATER request
+      # would read.
+      - review-diffs:/var/mrw/review-diffs:ro
+    depends_on:
+      egress-proxy:
+        condition: service_healthy
+    # Ready = the unix socket is actually listening. start_period is short
+    # (unlike worker's 300s) because there is no `npm ci` at runtime here —
+    # deps AND source are baked into the image at build time, so boot is
+    # just "start the process and open a socket".
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/reviewer/review.sock || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 60s
     command: ["npm", "start"]
 
   # --------------------------------------------------------------------------
@@ -341,6 +449,15 @@ volumes:
   # The spine's rw ledger/notes state (MRW_STATE_DIR) — deliberately off the
   # worker-writable tasks/ tree so it cannot be tampered from that cage.
   spine-notes:
+  # M3: shared unix-socket carrier between the broker (client) and the
+  # reviewer (listener) — same named-volume-vs-host-bind reasoning as
+  # broker-sock/worker-sock above.
+  reviewer-sock:
+  # M3: the broker WRITES ground-truth diff files here (rw); the reviewer
+  # reads them read-only. Large-diff channel for the M3 file extension (see
+  # broker/src/reviewer.ts's INLINE_THRESHOLD_BYTES — small diffs skip this
+  # volume entirely and go inline over the socket).
+  review-diffs:
   # NOTE: harness deps are NOT a named volume. A volume layered over the :ro
   # harness bind initializes itself from the HOST's node_modules (darwin
   # binaries, host-uid ownership → npm EACCES; hit live on the first M1 boot).

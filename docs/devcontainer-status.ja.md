@@ -63,8 +63,27 @@ credential 不在のアサーションは Phase 0 セルフチェックで live 
    対して常にクリーン。単一コンテナ fallback は維持(`WORKERD_SOCKET` 未設定 ⇒
    in-process、コミット意味論は同一)。live 検証: 両ケージで role self-check 全 PASS、
    `:ro` マウント上の plan/review + RPC 越しの implement/tests + notes volume への
-   stub publish 記録まで driver 1周完走。残りは memo の M2/M3(レール上の
-   orchestrator LLM、broker 側 reviewer)。
+   stub publish 記録まで driver 1周完走。残りは memo の M3(broker 側 reviewer)。
+
+6. ~~M2: レール上の orchestrator LLM~~ **実装 + live 検証済み 2026-07-15**
+   (`harness/src/spine/`、`npm run chat`)。長寿命の Agent SDK セッション
+   (streaming input)が、in-process MCP ツール(`mcp__spine__run_worker` /
+   `run_tests` / `review_diff` / `plan_repo` / `ask_human` / `show_human` /
+   `request_publish` / `done` / `abort`)経由で型付きアクションを一度に1つ提案し、
+   coded spine が不変条件台帳と照合して M1 プリミティブで実行する — LLM 自身は
+   何も実行しない。台帳の規則(純粋関数・単体テスト済み): HEAD を動かした worker
+   実行は tests-green と review-approved の両アテステーションを無効化する。
+   `request_publish` は plan + tests-green + review-approved がすべて**現在の
+   HEAD sha** を証明しているときだけ実行可能。予算(アクション / worker 実行)は
+   NaN 防御付きで fail-closed。人間との対話はすべて spine が所有する1つの
+   readline を通る(promise チェーンのロック、EOF = fail-closed の decline)。
+   分離トポロジ上で live 検証: (a) 早すぎる `request_publish` は型付きの
+   `invariants_not_met` 理由で拒否され、モデルはそれを一字一句報告した。
+   (b) フルサイクル(plan → worker RPC → tests RPC → review)は3つの
+   アテステーションが HEAD と完全一致して初めて publish ゲートに到達
+   (台帳スナップショット: testGreen.sha == reviewApproved.sha == headSha)、
+   stdin EOF は `publish_declined` として記録された。単体テスト33件 green
+   (`harness/test/`、`npm test` はスタブではなくなった)。
 
 M1 の初回 boot 摩擦(すべて live で発見、静的検査ではゼロ):
 - `:ro` の harness bind に重ねた named volume は**ホスト側** node_modules(darwin

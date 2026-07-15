@@ -1,14 +1,18 @@
 {
-  // Phase 0 dev container — compose-backed. The editor / SDK harness attach to
-  // the `coder` service, which is caged on an internal-only network and can
-  // reach the internet ONLY through the `egress-proxy` sidecar's allowlist.
-  "name": "mrw-phase0-coder",
+  // M1 dev container — compose-backed. The editor / SDK harness attach to the
+  // `orchestrator` service: that is the human's interactive surface (worktrees
+  // readable, spine + PLAN/REVIEW sessions live there, stdin answers the
+  // broker's approval gate). The `worker` is exec-only — it runs its RPC
+  // daemon headless and is driven BY the orchestrator over the worker-sock
+  // RPC; nobody attaches to it directly for day-to-day work.
+  "name": "mrw-orchestrator",
 
   "dockerComposeFile": ["docker-compose.yml"],
-  "service": "coder",
-  // Start BOTH services. Omitting the proxy would leave the coder with no
-  // egress path at all.
-  "runServices": ["coder", "egress-proxy"],
+  "service": "orchestrator",
+  // Start all 4 services. Omitting any one would leave the orchestrator unable
+  // to reach the internet (egress-proxy), publish (broker), or drive code
+  // changes (worker).
+  "runServices": ["orchestrator", "worker", "broker", "egress-proxy"],
 
   // Matches the bind mount target in docker-compose.yml.
   "workspaceFolder": "/workspaces/muti-repo-workspace",

@@ -1,18 +1,29 @@
 /**
  * multi/state.ts — per-ticket progress, persisted for RESUMABILITY.
  *
- * The ticket state file (tasks/<ticket>/phase3-state.json) records each repo's
- * terminal outcome. Publishing is the CHECKPOINT: a repo marked 'published' is
- * SKIPPED on a re-run, so a mid-sequence failure can be re-run and it resumes at
- * the first not-yet-published repo. Writes are atomic (temp file + rename) so a
- * crash mid-write never corrupts the record. A corrupt file on load is ignored
- * (not trusted) — the driver simply re-plans from scratch.
+ * The ticket state file (<stateDir>/<ticket>/phase3-state.json) records each
+ * repo's terminal outcome. Publishing is the CHECKPOINT: a repo marked
+ * 'published' is SKIPPED on a re-run, so a mid-sequence failure can be re-run
+ * and it resumes at the first not-yet-published repo. Writes are atomic (temp
+ * file + rename) so a crash mid-write never corrupts the record. A corrupt
+ * file on load is ignored (not trusted) — the driver simply re-plans from
+ * scratch.
+ *
+ * M1: the ledger's default home (tasks/<ticket>) is no longer safe in the
+ * split-container topology — the orchestrator container mounts the whole
+ * workspace `:ro`, and tasks/ under it is the WORKER's writable tree, not
+ * the orchestrator's. MRW_STATE_DIR redirects the ledger to a private,
+ * orchestrator-only notes volume there (e.g. /var/mrw/notes); unset, the
+ * Phase-3 default (tasks/<ticket>, inside the coder-writable workspace) is
+ * unchanged for the single-container fallback / host dev loop.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { TicketStateSchema, type RepoState, type TicketState } from "./types.js";
 
 export function stateDir(root: string, ticket: string): string {
+  const override = process.env.MRW_STATE_DIR;
+  if (override) return path.join(override, ticket);
   return path.join(root, "tasks", ticket);
 }
 

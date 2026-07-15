@@ -1,13 +1,27 @@
 /**
- * steps.ts — the four LLM leaves of the pipeline.
+ * steps.ts — the LLM leaves of the pipeline, plus the shared prompt/option
+ * builders those leaves are made of.
  *
- *   runPlan      — read-only; returns a typed Plan verdict.
- *   runImplement — edits the repo to apply the plan (fresh session).
- *   runReview    — READ-ONLY judge of the working diff vs the plan; typed verdict.
- *   runFix       — edits the repo to address review findings and/or test failures.
+ *   runPlan              — read-only; returns a typed Plan verdict.
+ *   runReview            — READ-ONLY judge of a diff vs the plan; typed verdict.
+ *   diffTouchesTests      — heuristic used by the publish gate.
+ *   buildImplementPrompt /
+ *   buildFixPrompt        — the exact prompt text for the edit steps.
+ *   editSessionOptions    — the exact tool posture (cwd/systemPrompt/tools/
+ *                           disallowedTools/maxTurns) for the edit steps.
  *
- * Each is a separate query() → fresh context. Only the typed verdicts (Plan,
- * Review) and the test gate's exit code ever steer the state machine.
+ * Plan and review are in-process, read-only leaves — they always run HERE
+ * (the orchestrator container never needs a writable worktree to plan or
+ * judge). Implement and fix are NOT run from this file: they edit the repo,
+ * which the split topology's worker daemon (workerd/handlers.ts) — or, in the
+ * single-container fallback, exec.ts — is the only place allowed to do. Both
+ * consumers build the identical prompt/options from the functions below, so
+ * there is exactly ONE source of truth for what "implement" and "fix" mean,
+ * regardless of which side of the container boundary runs them.
+ *
+ * Each LLM step is a separate query() → fresh context. Only the typed
+ * verdicts (Plan, Review) and the test gate's exit code ever steer the state
+ * machine.
  *
  * Tool scoping is REAL: read-only steps set `tools: READ_ONLY_TOOLS` (base set)
  * AND `disallowedTools: DENY_MUTATION` — under bypassPermissions, allowedTools
@@ -15,7 +29,7 @@
  * project settings (settingSources: []) so a malicious target-repo CLAUDE.md
  * cannot instruct the judge.
  */
-import { spawnSync } from "node:child_process";
+import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { PlanSchema, ReviewSchema } from "./types.js";
 import type { Plan, Review } from "./types.js";
 import {
@@ -23,48 +37,8 @@ import {
   DENY_MUTATION,
   EDIT_TOOLS,
   READ_ONLY_TOOLS,
-  runAgentQuery,
   runStructuredQuery,
 } from "./sdk.js";
-
-// --- diff capture ------------------------------------------------------------
-export interface WorkingDiff {
-  diff: string;
-  /**
-   * false when the diff could NOT be computed completely — git errored, or the
-   * output exceeded the buffer (a reviewer-BLINDING vector: pad a file past the
-   * limit so `git diff` truncates and the reviewer judges nothing). The
-   * orchestrator treats an incomplete diff as fail-closed, never as "approve".
-   */
-  complete: boolean;
-}
-
-/**
- * Harness-computed working diff, injected into the review/fix prompts so REVIEW
- * can stay strictly read-only (no Bash/git). `add -A -N` (intent-to-add) makes
- * NEW files show up in `git diff` without staging their contents.
- *
- * `repoDir` is the worktree to diff. The orchestrator passes it explicitly so a
- * multi-repo driver can diff each per-repo worktree in one process.
- */
-export function workingDiff(repoDir: string): WorkingDiff {
-  spawnSync("git", ["-C", repoDir, "add", "-A", "-N"], { encoding: "utf8" });
-  const r = spawnSync("git", ["-C", repoDir, "diff", "--no-color"], {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  // r.error is set on ENOBUFS (output too large) or spawn failure; status!==0 on
-  // a git error. Either way the diff is not trustworthy → not complete.
-  if (r.error || r.status !== 0) {
-    return {
-      diff:
-        "(working diff could not be computed completely — git error or output " +
-        "too large; possible reviewer-blinding)",
-      complete: false,
-    };
-  }
-  return { diff: r.stdout.trim() || "(no changes in working tree)", complete: true };
-}
 
 /**
  * Heuristic: does the working diff touch test files or the test runner config?
@@ -116,29 +90,13 @@ export async function runPlan(instruction: string, repoDir: string): Promise<Pla
 }
 
 // --- IMPLEMENT ---------------------------------------------------------------
-export async function runImplement(
-  instruction: string,
-  plan: Plan,
-  repoDir: string,
-): Promise<void> {
-  await runAgentQuery(
+/** The exact IMPLEMENT prompt, shared by exec.ts (fallback) and
+ *  workerd/handlers.ts (split mode, via the RPC request's `prompt` field). */
+export function buildImplementPrompt(instruction: string, plan: Plan): string {
+  return (
     "You are the IMPLEMENT step. Apply the plan below to the repository. Make " +
-      "the minimal change. Do NOT run git push or publish anything.\n\n" +
-      `INSTRUCTION:\n${instruction}\n\nPLAN:\n${JSON.stringify(plan, null, 2)}`,
-    {
-      cwd: repoDir,
-      systemPrompt: {
-        type: "preset",
-        preset: "claude_code",
-        append: "Implement the plan by editing files. Do not push or publish.",
-      },
-      // Edit-capable, but no network tools. (WebFetch is dead anyway — no
-      // egress; WebSearch runs server-side via the API, so this deny is the
-      // actual control for it — see DENY_ALWAYS in sdk.ts.)
-      tools: EDIT_TOOLS,
-      disallowedTools: DENY_ALWAYS,
-      maxTurns: 80,
-    },
+    "the minimal change. Do NOT run git push or publish anything.\n\n" +
+    `INSTRUCTION:\n${instruction}\n\nPLAN:\n${JSON.stringify(plan, null, 2)}`
   );
 }
 
@@ -181,17 +139,17 @@ export async function runReview(
 
 // --- FIX ---------------------------------------------------------------------
 /**
- * Addresses review findings and/or test failures in a fresh session. Runs only
- * inside the bounded fix loop; after it the orchestrator re-runs the test gate
- * (and review) — the model never declares itself fixed.
+ * The exact FIX prompt, addressing review findings and/or test failures.
+ * Consumed only inside the bounded fix loop; after it the orchestrator
+ * re-runs the test gate (and review) — the model never declares itself fixed.
+ * Shared by exec.ts (fallback) and workerd/handlers.ts (split mode).
  */
-export async function runFix(
+export function buildFixPrompt(
   instruction: string,
   plan: Plan,
   review: Review | null,
   testOutput: string | null,
-  repoDir: string,
-): Promise<void> {
+): string {
   const findingsBlock = review
     ? `REVIEW FINDINGS:\n${JSON.stringify(review.findings, null, 2)}`
     : "REVIEW FINDINGS: (none — this pass is driven by test failures)";
@@ -199,22 +157,40 @@ export async function runFix(
     ? `FAILING TEST OUTPUT (tail):\n${testOutput}`
     : "FAILING TEST OUTPUT: (tests were not the trigger)";
 
-  await runAgentQuery(
+  return (
     "You are the FIX step. Resolve the review findings and/or test failures " +
-      "below by editing the repository. Make the minimal change; stay within the " +
-      "plan's scope. Do NOT run git push or publish anything.\n\n" +
-      `INSTRUCTION:\n${instruction}\n\nPLAN:\n${JSON.stringify(plan, null, 2)}\n\n` +
-      `${findingsBlock}\n\n${testBlock}`,
-    {
-      cwd: repoDir,
-      systemPrompt: {
-        type: "preset",
-        preset: "claude_code",
-        append: "Fix the findings/tests by editing files. Do not push or publish.",
-      },
-      tools: EDIT_TOOLS,
-      disallowedTools: DENY_ALWAYS,
-      maxTurns: 80,
-    },
+    "below by editing the repository. Make the minimal change; stay within the " +
+    "plan's scope. Do NOT run git push or publish anything.\n\n" +
+    `INSTRUCTION:\n${instruction}\n\nPLAN:\n${JSON.stringify(plan, null, 2)}\n\n` +
+    `${findingsBlock}\n\n${testBlock}`
   );
+}
+
+// --- shared edit-session tool posture -----------------------------------------
+/**
+ * The exact Options for an implement/fix session (cwd, systemPrompt preset +
+ * append, tools, disallowedTools, maxTurns) — everything EXCEPT the prompt
+ * text. Both the daemon (workerd/handlers.ts) and the fallback (exec.ts) call
+ * this so the TOOL POSTURE is pinned in exactly one place: an injected
+ * orchestrator can vary the prompt but never the tool set (see protocol.ts's
+ * header comment on this split).
+ */
+export function editSessionOptions(repoDir: string, kind: "implement" | "fix"): Partial<Options> {
+  return {
+    cwd: repoDir,
+    systemPrompt: {
+      type: "preset",
+      preset: "claude_code",
+      append:
+        kind === "implement"
+          ? "Implement the plan by editing files. Do not push or publish."
+          : "Fix the findings/tests by editing files. Do not push or publish.",
+    },
+    // Edit-capable, but no network tools. (WebFetch is dead anyway — no
+    // egress; WebSearch runs server-side via the API, so this deny is the
+    // actual control for it — see DENY_ALWAYS in sdk.ts.)
+    tools: EDIT_TOOLS,
+    disallowedTools: DENY_ALWAYS,
+    maxTurns: 80,
+  };
 }

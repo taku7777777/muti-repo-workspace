@@ -38,21 +38,25 @@
  * the driver batches them into COMBINED cross-repo views. The gate LOGIC (what
  * must be true to pass) never changes; only WHERE the human is asked.
  *
+ * M1 refactor: IMPLEMENT/FIX/the test gate no longer run directly in this
+ * process — they go through exec.ts's mode switch, which either RPCs the
+ * worker daemon (split-container topology) or runs in-process (fallback).
+ * Either way the worker/fallback commits deterministically after
+ * implement/fix, so the loop's diff is the READ-ONLY commit range
+ * `baseSha..HEAD` (gitops.ts's commitRangeDiff) instead of a working-tree
+ * diff — the thing that makes this file's own read-only `git diff` work even
+ * when repoDir is mounted `:ro` (the orchestrator container).
+ *
  * Run (single repo):  npm run orchestrate -- "add a --version flag to the CLI"
  */
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CWD, MAX_FIX_ATTEMPTS } from "./sdk.js";
-import {
-  diffTouchesTests,
-  runFix,
-  runImplement,
-  runPlan,
-  runReview,
-  workingDiff,
-} from "./steps.js";
-import { humanApproval, testGate } from "./gates.js";
+import { buildFixPrompt, buildImplementPrompt, diffTouchesTests, runPlan, runReview } from "./steps.js";
+import { humanApproval } from "./gates.js";
 import { publish } from "./publish.js";
+import { commitRangeDiff, revParseHead } from "./gitops.js";
+import { execFix, execImplement, execTests } from "./exec.js";
 import type { Plan, Review } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -105,6 +109,13 @@ export interface OrchestratorOptions {
    * caveat are never lost.
    */
   approvePublish?: (info: PrePublishInfo) => Promise<boolean>;
+  /**
+   * The repo's HEAD sha recorded at worktree setup, used as the base of the
+   * commit-range diff (commitRangeDiff in gitops.ts). Recorded by the driver
+   * at execSetupWorktree() time (see multi/driver.ts's WorkItem.baseSha); when
+   * omitted, the single-repo CLI records HEAD itself right before IMPLEMENT.
+   */
+  baseSha?: string;
 }
 
 /**
@@ -224,9 +235,19 @@ export async function runOrchestrator(
     return { outcome: "declined", reason: "plan declined" };
   }
 
+  // The base of the commit-range diff (gitops.ts's commitRangeDiff). The
+  // driver records this at execSetupWorktree() time; the single-repo CLI has
+  // no such pre-pass, so it records HEAD itself, right before the worktree's
+  // first commit gets made.
+  const baseSha = opts.baseSha ?? revParseHead(repoDir);
+
   // STATE: IMPLEMENT ---------------------------------------------------------
   console.log(`\n=== IMPLEMENT (${label}) ===`);
-  await runImplement(instruction, plan, repoDir);
+  await execImplement({
+    repoDir,
+    prompt: buildImplementPrompt(instruction, plan),
+    commitMessage: `mrw: IMPLEMENT ${label}`,
+  });
 
   // STATE: REVIEW + TEST-GATE, with a BOUNDED fix loop -----------------------
   // Invariant to leave this block "clean": the diff was computed COMPLETELY,
@@ -239,12 +260,13 @@ export async function runOrchestrator(
       `\n=== REVIEW + TEST-GATE (${label}) (fix attempts used: ${attempt}/${MAX_FIX_ATTEMPTS}) ===`,
     );
 
-    // Harness-computed diff. An INCOMPLETE diff (git error / oversize) is a hard
-    // stop — never let the reviewer judge a blinded/empty diff and approve.
-    const wd = workingDiff(repoDir);
+    // READ-ONLY commit-range diff <baseSha>..HEAD (gitops.ts). An INCOMPLETE
+    // diff (git error / oversize) is a hard stop — never let the reviewer
+    // judge a blinded/empty diff and approve.
+    const wd = commitRangeDiff(repoDir, baseSha);
     if (!wd.complete) {
-      console.error(`\n[diff] ${wd.diff}\nFAIL-CLOSED — cannot review an incomplete diff.`);
-      return { outcome: "failed", reason: "incomplete working diff (fail-closed)" };
+      console.error(`\n[diff] ${wd.diff}\nFAIL-CLOSED — cannot review an incomplete commit-range diff.`);
+      return { outcome: "failed", reason: "incomplete commit-range diff (fail-closed)" };
     }
     lastDiff = wd.diff;
 
@@ -256,7 +278,7 @@ export async function runOrchestrator(
     }
 
     // TEST-GATE is the non-negotiable exit-code decider.
-    const test = testGate(repoDir);
+    const test = await execTests(repoDir);
     console.log(`[test-gate] ${test.pass ? "PASSED" : "FAILED"}`);
 
     if (review.verdict === "approve" && test.pass) break;
@@ -275,13 +297,16 @@ export async function runOrchestrator(
     // STATE: FIX (addresses findings and/or the failing test output) ---------
     attempt++;
     console.log(`\n=== FIX (attempt ${attempt}/${MAX_FIX_ATTEMPTS}) (${label}) ===`);
-    await runFix(
-      instruction,
-      plan,
-      review.verdict === "request_changes" ? review : null,
-      test.pass ? null : test.output,
+    await execFix({
       repoDir,
-    );
+      prompt: buildFixPrompt(
+        instruction,
+        plan,
+        review.verdict === "request_changes" ? review : null,
+        test.pass ? null : test.output,
+      ),
+      commitMessage: `mrw: FIX ${label} attempt ${attempt}`,
+    });
   }
 
   // GATE: approve-publish (explicit human, shown the actual change) -----------

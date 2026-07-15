@@ -37,10 +37,10 @@ import {
   type OrchestratorResult,
   type PrePublishInfo,
 } from "../orchestrator.js";
+import { execSetupWorktree } from "../exec.js";
 import type { Plan } from "../types.js";
 import { loadRepos, loadWorkspace, resolveWorkspaceRoot, selectRepos } from "./config.js";
-import { setupWorktree } from "./worktree.js";
-import { loadState, saveState, setRepoState } from "./state.js";
+import { loadState, saveState, setRepoState, statePath } from "./state.js";
 import type { DriverArgs, RepoConfig, TicketState } from "./types.js";
 
 // A repo that still needs work this run, with its isolated worktree + pre-plan.
@@ -48,6 +48,9 @@ interface WorkItem {
   name: string;
   repoDir: string;
   plan: Plan;
+  /** HEAD recorded at worktree setup — the base of the orchestrator's
+   *  commit-range diff (gitops.ts's commitRangeDiff). */
+  baseSha: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +137,7 @@ function renderPrePublishLedger(
 }
 
 function renderFinalReport(
+  root: string,
   state: TicketState,
   selected: RepoConfig[],
   skipped: string[],
@@ -169,7 +173,7 @@ function renderFinalReport(
     console.log(`\nNOT ATTEMPTED (sequence stopped before these) (${notAttempted.length}):`);
     for (const n of notAttempted) console.log(`   · ${n}`);
   }
-  console.log(`\nState persisted at tasks/${state.ticket}/phase3-state.json — re-run to resume.`);
+  console.log(`\nState persisted at ${statePath(root, state.ticket)} — re-run to resume.`);
   console.log(`===============================================================\n`);
 }
 
@@ -235,7 +239,7 @@ export async function runDriver(args: DriverArgs): Promise<number> {
 
   if (todo.length === 0) {
     console.log(`[driver] nothing to do — all selected repos already published.`);
-    renderFinalReport(state, selected, skipped);
+    renderFinalReport(root, state, selected, skipped);
     return 0;
   }
 
@@ -243,7 +247,8 @@ export async function runDriver(args: DriverArgs): Promise<number> {
   const work: WorkItem[] = [];
   for (const repo of todo) {
     console.log(`\n[driver] preparing worktree for ${repo.name} …`);
-    const repoDir = setupWorktree({ root, repo, ticket: args.ticket, branch, purpose });
+    const setup = await execSetupWorktree({ root, repo, ticket: args.ticket, branch, purpose });
+    const repoDir = setup.repoDir;
     setRepoState(root, args.ticket, state, repo.name, {
       outcome: "pending",
       branch,
@@ -251,7 +256,7 @@ export async function runDriver(args: DriverArgs): Promise<number> {
     });
     console.log(`[driver] planning ${repo.name} (read-only) …`);
     const plan = await runPlan(instruction, repoDir);
-    work.push({ name: repo.name, repoDir, plan });
+    work.push({ name: repo.name, repoDir, plan, baseSha: setup.baseSha });
   }
 
   // COMBINED plan view + ONE combined approve-plan gate (the cross-repo gate).
@@ -266,7 +271,7 @@ export async function runDriver(args: DriverArgs): Promise<number> {
         worktree: it.repoDir,
       });
     }
-    renderFinalReport(state, selected, skipped);
+    renderFinalReport(root, state, selected, skipped);
     return 0;
   }
 
@@ -292,6 +297,7 @@ export async function runDriver(args: DriverArgs): Promise<number> {
         repoDir: it.repoDir,
         label: it.name,
         plan: it.plan,
+        baseSha: it.baseSha,
         approvePlan: async () => true, // already approved at the combined gate
         approvePublish,
       });
@@ -314,14 +320,14 @@ export async function runDriver(args: DriverArgs): Promise<number> {
           `${result.reason ? ` (${result.reason})` : ""}. ` +
           `NOT continuing to the remaining repo(s) — no silent partial success.`,
       );
-      renderFinalReport(state, selected, skipped);
+      renderFinalReport(root, state, selected, skipped);
       // Human decline is a clean stop (0); anything else is fail-closed (1).
       return result.outcome === "declined" ? 0 : 1;
     }
   }
 
   console.log(`\n[driver] all ${work.length} repo(s) published for ticket ${args.ticket}.`);
-  renderFinalReport(state, selected, skipped);
+  renderFinalReport(root, state, selected, skipped);
   return 0;
 }
 

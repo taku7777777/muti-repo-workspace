@@ -34,7 +34,7 @@ fi
 # Idempotent: the `telemetry` network is `external: true` in the compose
 # file (shared with the sibling claude-code-monitoring stack), so compose up
 # fails outright if it doesn't exist yet — create it here, internal-only,
-# same fail-closed shape as `caged` (docs/devcontainer-status.md item 9).
+# same fail-closed shape as `caged` (docs/devcontainer-status.md item 10).
 docker network create --internal mrw-telemetry 2>/dev/null || true
 
 exec docker compose -f .devcontainer/docker-compose.yml up -d "$@"

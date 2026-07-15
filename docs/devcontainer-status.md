@@ -132,7 +132,23 @@ Phase 0 self-check):
    agent-roles.md, egress-selfcheck-per-role.md, and the READMEs) is the M4
    finalization itself.
 
-9. Per-ticket OTEL telemetry (workspace/work_type/role attribution) —
+9. ~~The reviewer-enabled live publish (the one scene M3 had left
+   unexercised)~~ **DONE 2026-07-15** — ticket DEMO-6 on phase2-demo, driven
+   end-to-end through the M2 chat surface (`npm run chat`) on the split
+   topology, with the broker booted with
+   `REVIEWER_SOCKET=/run/reviewer/review.sock`. One run exercised every
+   layer of the final topology in sequence: plan consultation at the spine
+   gate (the orchestrator asked format/precedence questions and waited for
+   the human's answers), implement + tests over the worker RPC, read-only
+   review, `request_publish` passing the ledger invariants (testGreen.sha ==
+   reviewApproved.sha == headSha), the broker re-deriving ground truth and
+   consulting the reviewer on its OWN diff — the **`advisory reviewer:
+   approve — …` line rendered above the full diff at the sha-typed gate**
+   for the first time in a real publish — and the typed sha pushing exactly
+   `6257bb9` and opening phase2-demo#3. The remote ref matches the approved
+   sha.
+
+10. Per-ticket OTEL telemetry (workspace/work_type/role attribution) —
    **BUILT 2026-07-15 (live validation pending)**. Closes the gap that the
    containerized coder path (worker/orchestrator/reviewer) sent NO telemetry
    at all: SDK sessions deliberately don't read user settings
@@ -242,6 +258,15 @@ cannot surface):
   has shipped, the stored instruction still sticks (unchanged behavior) and
   the driver only warns. `rm -rf tasks/<ticket>` is no longer required to
   correct an instruction before anything has published.
+- DEMO-6 finding (open, low): `diffTouchesTests()`'s patterns (`*.test.*`,
+  `tests/` directories, jest/vitest/mocha/playwright configs, `package.json`
+  "test"-script edits) do NOT match a root-level bare `test.js` — the DEMO-6
+  diff added assertions to phase2-demo's `test.js` and the "change touches
+  test files" caveat gate never fired before the publish gate. Harmless in
+  this run (the human and the advisory reviewer both saw the test change in
+  the diff, and the reviewer explicitly judged it non-tampering), but the
+  pattern should also match bare `test(s).<ext>` / `test_*` files at any
+  depth.
 - Zod v4's `z.toJSONSchema()` stamps the draft 2020-12 meta-schema ref, which the
   bundled Claude Code CLI's ajv (draft-07) cannot resolve — fixed with
   `target: "draft-7"` in `harness/src/sdk.ts`.

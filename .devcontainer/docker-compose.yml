@@ -85,7 +85,7 @@ services:
       # Keep a locked build from phoning home to a not-yet-allowlisted host.
       DISABLE_AUTOUPDATER: "1"
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
-      # Per-ticket OTEL telemetry (docs/devcontainer-status.md item 9): the
+      # Per-ticket OTEL telemetry (docs/devcontainer-status.md item 10): the
       # `telemetry` network (mrw-telemetry, external, internal-only — see the
       # networks: block below) reaches ONLY the monitoring stack's
       # otel-collector, never the internet. MRW_TELEMETRY=0 disables export
@@ -482,7 +482,7 @@ networks:
   # Neither the worker nor the orchestrator is here — neither gets github access.
   egress:
     driver: bridge
-  # DELIBERATELY OPENED, docs/devcontainer-status.md item 9: a SECOND
+  # DELIBERATELY OPENED, docs/devcontainer-status.md item 10: a SECOND
   # `internal: true` network, reaching ONLY the monitoring stack's
   # otel-collector — created OUTSIDE this compose file (idempotently, by
   # scripts/devcontainer-up.sh) so it can be shared with the sibling
@@ -501,7 +501,7 @@ networks:
   #     the local collector/Loki (a caged, prompt-injectable process talking
   #     to a network peer it can reach). This is accepted for now because the
   #     blast radius is a local monitoring stack, not the internet or the
-  #     publish path — see docs/devcontainer-status.md item 9 for the full
+  #     publish path — see docs/devcontainer-status.md item 10 for the full
   #     writeup.
   telemetry:
     name: mrw-telemetry

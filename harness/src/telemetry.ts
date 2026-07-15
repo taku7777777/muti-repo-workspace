@@ -7,7 +7,7 @@
  * baseOptions()) and the cage network is `internal: true` with no route to
  * the host collector. The fix opens ONE deliberate internal network
  * (`mrw-telemetry`, docker-compose.yml) reaching ONLY the collector — see
- * docs/devcontainer-status.md item 9.
+ * docs/devcontainer-status.md item 10.
  *
  * Propagation is NOT "forward whatever string arrived over the wire" — that
  * would let an untrusted value (a coder-controlled prompt, an orchestrator

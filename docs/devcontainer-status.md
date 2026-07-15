@@ -66,8 +66,29 @@ Phase 0 self-check):
    unset ⇒ in-process, same commit semantics). Live-validated: role self-checks
    pass in both cages; a full driver cycle ran with plan/review on the `:ro`
    mount, implement/tests over the RPC, and a stub publish recorded in the
-   notes-volume ledger. Remaining M2/M3 (orchestrator LLM on rails, broker-side
-   reviewer) per [agent-orchestration.md](agent-orchestration.md).
+   notes-volume ledger. Remaining M3 (broker-side reviewer) per
+   [agent-orchestration.md](agent-orchestration.md).
+
+6. ~~M2: the orchestrator LLM on rails~~ **BUILT + LIVE-VALIDATED 2026-07-15**
+   (`harness/src/spine/`, `npm run chat`). A long-lived Agent SDK session
+   (streaming input) proposes ONE typed action at a time via in-process MCP
+   tools (`mcp__spine__run_worker` / `run_tests` / `review_diff` / `plan_repo` /
+   `ask_human` / `show_human` / `request_publish` / `done` / `abort`); the
+   coded spine validates each against the invariant ledger and executes it via
+   the M1 primitives — the LLM never executes anything itself. Ledger rules
+   (pure, unit-tested): a worker run that moves HEAD invalidates both the
+   test-green and review-approved attestations; `request_publish` is
+   executable only when plan + tests-green + review-approved all attest the
+   CURRENT HEAD sha; budgets (actions / worker runs) are NaN-defensive and
+   fail-closed. All human interaction flows through ONE readline owned by the
+   spine (promise-chain lock; EOF = fail-closed decline). Live-validated on
+   the split topology: (a) a premature `request_publish` was refused with the
+   typed `invariants_not_met` reason and the model reported it verbatim;
+   (b) a full rails cycle (plan → worker RPC → tests RPC → review) reached the
+   publish gate only after all three attestations matched HEAD exactly
+   (ledger snapshot: testGreen.sha == reviewApproved.sha == headSha), with
+   stdin EOF recorded as `publish_declined`. 33 unit tests green
+   (`harness/test/`, `npm test` is no longer a stub).
 
 M1 first-boot friction found and fixed (all live, none static):
 - A named volume layered over the `:ro` harness bind initializes from the

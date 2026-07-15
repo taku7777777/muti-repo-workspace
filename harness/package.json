@@ -11,8 +11,9 @@
     "orchestrate": "tsx src/orchestrator.ts",
     "drive": "tsx src/multi/driver.ts",
     "workerd": "tsx src/workerd/index.ts",
+    "chat": "tsx src/spine/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'phase0 harness: no tests yet' && exit 0"
+    "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.205",

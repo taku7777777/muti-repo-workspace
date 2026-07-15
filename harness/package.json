@@ -12,6 +12,7 @@
     "drive": "tsx src/multi/driver.ts",
     "workerd": "tsx src/workerd/index.ts",
     "chat": "tsx src/spine/index.ts",
+    "triage": "tsx src/triage-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts"
   },

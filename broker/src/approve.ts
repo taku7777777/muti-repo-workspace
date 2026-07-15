@@ -20,6 +20,7 @@
  */
 import * as readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import type { ReviewerVerdict } from "./reviewer.js";
 
 export interface ApprovalView {
   repo: string; // the worktree directory name (request.repo)
@@ -36,9 +37,36 @@ export interface ApprovalView {
   commitList: string;
   diffStat: string;
   diff: string;
+  // M3: the OPTIONAL advisory reviewer's verdict, or null when the feature is
+  // off / the consult failed / timed out / came back malformed (see
+  // broker/src/reviewer.ts — maybeConsultReviewer() collapses every failure
+  // mode to "unavailable", never a throw). ADVISORY ONLY: this field is
+  // rendered for the human below but never changes the sha-typed gate's
+  // semantics. TRI-STATE: null = feature OFF (render nothing — the pre-M3
+  // header stays byte-identical); "unavailable" = feature ON but the consult
+  // failed (render an explicit no-verdict line so an outage is never
+  // mistaken for an approval); a verdict = render it.
+  reviewerVerdict: ReviewerVerdict | "unavailable" | null;
 }
 
 const PAGE_LINES = 400;
+
+// Cap so a malicious or merely verbose reviewer note cannot bury the header
+// under itself. Newlines are folded to " / " first so multi-line notes still
+// render on ONE line — the whole point of this line is to be impossible to
+// miss above the diff.
+const MAX_NOTES_CHARS = 500;
+
+function foldNotes(notes: string, max = MAX_NOTES_CHARS): string {
+  // Strip stray model-output tag fragments (</invoke>, </summary>, ...) — the
+  // known cosmetic issue recorded in devcontainer-status.md ("REVIEW step's
+  // structured summary occasionally carries trailing tag fragments") shows up
+  // in reviewer notes too. This line must stay legible above the diff.
+  const cleaned = notes.replace(/<\/?(invoke|summary|parameter|antml[^>]*)>/g, " ");
+  const folded = cleaned.replace(/\r\n|\r|\n/g, " / ").trim();
+  if (folded.length <= max) return folded;
+  return folded.slice(0, Math.max(0, max - 1)).trimEnd() + "…";
+}
 
 /** The summary shown before the diff — everything except the (paged) diff body. */
 function renderHeader(v: ApprovalView): string {
@@ -66,6 +94,25 @@ function renderHeader(v: ApprovalView): string {
   if (v.diffStat) {
     lines.push("diffstat:");
     lines.push(v.diffStat);
+    lines.push("");
+  }
+  // M3 advisory reviewer verdict — FAIL-VISIBLE by construction: every path
+  // With the feature ON, a failed consult renders an EXPLICIT no-verdict
+  // line rather than silently omitting one, so a human never mistakes
+  // "reviewer said nothing" for "reviewer said approve". With the feature
+  // OFF (null), nothing is rendered at all — the operator turned it off,
+  // and the pre-M3 header stays byte-identical. Advisory only: this line
+  // never gates anything below it — the sha-typed prompt is unchanged.
+  if (v.reviewerVerdict === "unavailable") {
+    lines.push("advisory reviewer: no verdict (reviewer failed/timed out — decide from the diff alone)");
+    lines.push("");
+  } else if (v.reviewerVerdict) {
+    const notes = foldNotes(v.reviewerVerdict.notes);
+    lines.push(
+      v.reviewerVerdict.verdict === "approve"
+        ? `advisory reviewer: approve — ${notes}`
+        : `advisory reviewer: CONCERNS — ${notes}`,
+    );
     lines.push("");
   }
   lines.push("========================================================================");

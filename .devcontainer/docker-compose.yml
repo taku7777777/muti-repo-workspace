@@ -144,8 +144,10 @@ services:
     # coder's shared .env (which would also mean a token written there reaches the
     # coder). The token arrives via the `environment` interpolation above.
     volumes:
-      # The broker's TypeScript source, read-only (installed deps live in the image).
-      - ../broker/src:/broker/src:ro
+      # NOTE: the broker's source is NOT mounted — it is baked into the image at
+      # build (see broker.Dockerfile). The host's broker/src lives inside the
+      # coder-writable workspace tree, so mounting it (even :ro) would let a
+      # tampered source execute with the token on the next broker restart.
       # The shared socket named volume (also mounted in the coder).
       - broker-sock:/run/broker
       # The coder-writable worktrees — READ-ONLY. The broker reads objects by sha;

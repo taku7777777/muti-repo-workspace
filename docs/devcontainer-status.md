@@ -54,6 +54,16 @@ Phase 0 self-check):
    review independence from app-layer tool scoping to an OS boundary. See
    [agent-roles.md](agent-roles.md) § Adoption order.
 
+Post-run hardening (found during a design walkthrough after the live runs,
+FIXED 2026-07-15): the broker's *source* was the one runtime input still read
+from the coder-writable tree — deps and policy were baked into the image, but
+`npm start` executed `/broker/src` bind-mounted (`:ro`) from `../broker/src`,
+which on the host lives inside the workspace tree the coder mounts RW. A
+prompt-injected coder could therefore tamper the broker's code and have it run
+(with the token) at the next broker restart. Fix: bake `broker/src` +
+`tsconfig.json` into the image (write-stripped) and drop the mount — everything
+the broker executes is now fixed at build, a trusted human-initiated moment.
+
 First-boot friction found and fixed (exactly the class of issue static checks
 cannot surface):
 - Bind-mounted `harness/node_modules` carried macOS (darwin-arm64) esbuild

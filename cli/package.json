@@ -1,0 +1,13 @@
+{
+  "name": "mrw",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Thin dispatcher CLI over the scripts/ in a muti-repo-workspace tool checkout. Resolves its own install location (toolHome) and shells out to the existing Phase-1 scripts — it does not reimplement any logic.",
+  "bin": {
+    "mrw": "./mrw.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

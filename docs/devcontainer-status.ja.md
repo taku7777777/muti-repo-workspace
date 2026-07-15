@@ -140,7 +140,7 @@ credential 不在のアサーションは Phase 0 セルフチェックで live 
    リモート ref は承認された sha と一致。
 
 10. チケット単位の OTEL telemetry(workspace/work_type/role の attribution)
-   — **実装 2026-07-15(live 検証は未実施)**。コンテナ化された coder 経路
+   — **実装 + live 検証済み 2026-07-15**。コンテナ化された coder 経路
    (worker/orchestrator/reviewer)がこれまで telemetry を一切送れなかった
    ギャップを埋める: SDK セッションは意図的にユーザー settings を読まない
    (`settingSources` は `'user'` を含まない)し、`caged` ネットワークは
@@ -187,10 +187,20 @@ credential 不在のアサーションは Phase 0 セルフチェックで live 
    解決できる。`broker/src/config.ts` の `ticketFromWorktreesRoot()` は
    (M4 時点で既存の broker/reviewer テスト基盤ギャップのとおり)接続する
    パッケージテスト基盤が無く、`broker/` の他の部分と同様 live 検証に
-   委ねる。live 検証(ネットワーク到達性、Loki で `workspace=<ticket>` が
-   `role` ごとに分かれて出ること、monitoring スタック停止時の fail-open
-   挙動)は**未実施** — この変更が依存する `claude-code-monitoring` 側の
-   対応版とあわせて行う。
+   委ねる。live 検証済み 2026-07-15(`claude-code-monitoring` 側で
+   `otel-collector` を `mrw-telemetry` に二重ホームする対応版とあわせて
+   実施): worker ケージ内から、直接のインターネットは引き続き遮断・
+   `loki`/`grafana` は名前解決すら不可のまま、`otel-collector:4318` だけが
+   応答する — ケージが到達できるようになったホストは正確に1つ。両 role
+   self-check も green のまま。DEMO-7 の plan 実行(driver、ゲートで
+   decline)、worker RPC 経由の implement、`ticket: "DEMO-7"` を載せた
+   reviewer ソケットプローブのすべてが、Loki に
+   `{workspace="DEMO-7", work_type="feature"}` の `api_request` ストリーム
+   として着地し、structured metadata の `role` フィルタで分離できた
+   (`| role="plan"` 14件、`| role="worker"` 9件、`| role="reviewer"` 4件。
+   role=spine は同一メカニズムのため次回の chat 実行で現れる)。fail-open
+   も検証済み: collector を**停止**した状態でも drive の1周は OTLP エラー
+   出力ゼロで正常完走した。
 
 M1 の初回 boot 摩擦(すべて live で発見、静的検査ではゼロ):
 - `:ro` の harness bind に重ねた named volume は**ホスト側** node_modules(darwin

@@ -149,7 +149,7 @@ Phase 0 self-check):
    sha.
 
 10. Per-ticket OTEL telemetry (workspace/work_type/role attribution) —
-   **BUILT 2026-07-15 (live validation pending)**. Closes the gap that the
+   **BUILT + LIVE-VALIDATED 2026-07-15**. Closes the gap that the
    containerized coder path (worker/orchestrator/reviewer) sent NO telemetry
    at all: SDK sessions deliberately don't read user settings
    (`settingSources` excludes `'user'`), and the `caged` network is
@@ -194,10 +194,19 @@ Phase 0 self-check):
    network. `broker/src/config.ts`'s `ticketFromWorktreesRoot()` has no
    package test infra to attach to (per M4's existing broker/reviewer test
    gap) and is left to live verification, same as the rest of `broker/`.
-   Live validation (network reachability, `workspace=<ticket>` showing up in
-   Loki broken out by `role`, fail-open behavior with the monitoring stack
-   down) is **NOT YET DONE** — see the companion `claude-code-monitoring`
-   change this depends on.
+   Live-validated 2026-07-15 (with the companion `claude-code-monitoring`
+   change dual-homing its `otel-collector` onto `mrw-telemetry`): from
+   inside the worker cage, direct internet stays blocked and `loki`/
+   `grafana` stay unresolvable while `otel-collector:4318` answers — the
+   cage gained exactly one reachable host; both role self-checks stay
+   green. A DEMO-7 plan run (driver, declined at the gate), a worker-RPC
+   implement, and a reviewer socket probe carrying `ticket: "DEMO-7"` all
+   landed in Loki as `{workspace="DEMO-7", work_type="feature"}`
+   `api_request` streams, separable by structured-metadata `role` filters
+   (`| role="plan"` 14, `| role="worker"` 9, `| role="reviewer"` 4 entries;
+   role=spine uses the identical mechanism and will show at the next chat
+   run). Fail-open verified: with the collector STOPPED, a full drive run
+   completed normally with zero OTLP error lines in its output.
 
 M1 first-boot friction found and fixed (all live, none static):
 - A named volume layered over the `:ro` harness bind initializes from the

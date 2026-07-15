@@ -158,6 +158,51 @@ closing this means running the scripts inside the sandbox with a scoped egress
 instead of excluding them (needs runtime validation that push still works).
 See [settings-reference/orchestrator.md](settings-reference/orchestrator.md).
 
+## The containerized execution flow (Phases 0–3, live-validated)
+
+The container path replaces the macOS sandbox with a Linux network-namespace
+boundary. All four phases have run live — see
+[devcontainer-status.md](devcontainer-status.md) for the run records. One
+diagram summarizes who does what and what crosses each boundary:
+
+```
+[coder devcontainer — caged network, no route out except the proxy]
+harness (a deterministic state machine — a program, NOT an LLM)
+  ├─ PLAN      … read-only LLM session ──────┐
+  ├─ IMPLEMENT … edit-capable LLM session     ├─ every LLM turn goes through
+  ├─ REVIEW    … read-only LLM session        │  egress-proxy (Squid allowlist)
+  │              (a FRESH session — never     │  to api.anthropic.com ONLY
+  │               the one that wrote the code)┘
+  ├─ TEST GATE … machine judgment (exit code === 0; never a model claim)
+  ├─ human gate ① (approve plan)  ② (approve publish) … via the terminal
+  └─ publish INTENT over a unix socket ──▶ [broker container — egress network]
+                                              ├─ re-derives GROUND TRUTH itself
+                                              │  (diff/URL/sha from git objects +
+                                              │   its own baked policy — the
+                                              │   coder's words are never trusted)
+                                              ├─ policy check (host/org/branch)
+                                              ├─ human gate ③ (type the sha)
+                                              └─ push + gh pr create
+        typed response (sha/PR, or one of ────┘   (the ONLY token holder)
+        ~20 fail-closed failure codes)
+harness reads the response and decides what happens next
+(multi-repo driver: update the ledger, advance to the next repo or stop)
+```
+
+Three distinctions that make the flow trustworthy:
+
+1. **Checks have three different owners.** The diff REVIEW is an independent
+   LLM (advisory, never decisive); the TEST GATE is a machine (exit code only);
+   the two in-coder approval gates plus the broker's sha-typed gate are humans.
+   Humans hold minimal but decisive touchpoints.
+2. **The broker does not act on what the coder says.** The intent is a typed
+   *wish* (`{repo, branch, title, body}`); everything that matters — the diff
+   the human approves, the push URL, the sha — is re-derived on the trusted
+   side from git objects and the baked policy file.
+3. **Every failure means "not published."** The broker's response is typed;
+   any non-ok code (declined, dirty_worktree, sha_changed, …) is fail-closed,
+   so the harness can build sequencing on top of it safely.
+
 ## Configuration model
 
 Everything an organization customizes lives in `config/` and `templates/`;

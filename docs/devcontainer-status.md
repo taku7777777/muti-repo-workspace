@@ -2,14 +2,17 @@
 
 Companion to the design in [../devcontainer-orchestrator-architecture.md](../../devcontainer-orchestrator-architecture.md).
 This tracks what is **built + statically validated** vs what remains.
-**Live-boot status (2026-07-15): Phases 0–2 have now run live.** The stack
-boots, the egress self-check passes all 6 assertions from inside the coder, the
-Phase 1 pipeline completed a full cycle on a demo repo (subscription OAuth token
-injected from the macOS Keychain), and the Phase 2 broker performed a real
-publish: typed intent over the socket → ground-truth render → human typed the
-sha at the broker → push of exactly the approved sha → `gh pr create`
-(taku7777777/phase2-demo#1), with the coder's egress self-check still passing
-afterwards. Phase 3 remains statically validated only.
+**Live-boot status (2026-07-15): ALL phases (0–3) have now run live.** The
+stack boots, the egress self-check passes all 6 assertions from inside the
+coder, the Phase 1 pipeline completed a full cycle on a demo repo (subscription
+OAuth token injected from the macOS Keychain), the Phase 2 broker performed a
+real publish (typed intent → ground-truth render → sha typed at the broker →
+push of exactly the approved sha → `gh pr create`, taku7777777/phase2-demo#1),
+and the Phase 3 driver drove a 2-repo ticket (DEMO-1) end-to-end: local
+`--reference` worktrees, one combined plan gate, sequential per-repo pipelines,
+two broker-gated publishes landing exactly the approved shas
+(phase2-demo#2, phase3-docs#1), honest ledger + resumable state throughout.
+The egress self-check still passes after every publish.
 
 ## Built & validated (Phase 0–3)
 
@@ -41,7 +44,11 @@ Phase 0 self-check):
    `allowed_push_orgs=[taku7777777]`; `BROKER_WORKTREES_DIR` pointed at
    `tasks/<T>/repositories` (worktrees under `repositories/` are `:ro` for the
    coder); the remote ref landed on exactly the approved sha.
-4. Phase 3: run one multi-repo ticket (see [devcontainer-phase3.md](devcontainer-phase3.md)).
+4. ~~Phase 3: run one multi-repo ticket~~ **DONE 2026-07-15** — ticket DEMO-1
+   across phase2-demo (code) + phase3-docs (docs): combined plan gate caught a
+   first attempt whose per-repo plans cross-scoped into the sibling repo (human
+   declined; see findings below), the re-scoped run published both repos through
+   the broker, and the remote refs match the approved shas exactly.
 5. First role-split increment (after 3–4): a **read-only judge container**
    (source `:ro`, anthropic-only egress) running PLAN and REVIEW — upgrades
    review independence from app-layer tool scoping to an OS boundary. See
@@ -57,6 +64,19 @@ cannot surface):
   carries trailing model-output tag fragments (`</summary>`, `</invoke>`), which
   flow verbatim into the broker-rendered PR body. Harmless but ugly — the harness
   should sanitize/strip the structured review text before it reaches publish.
+- Phase 3 finding (open): per-repo plan scoping is **prompt-level only**. The
+  driver hands every repo's planner the full ticket instruction; on the first
+  DEMO-1 run one planner planned edits in the *sibling* repo (worktrees share
+  `tasks/<T>/repositories/`, and cross-repo edits would not appear in that
+  repo's own diff/review). The combined plan gate caught it, and an instruction
+  that says "change ONLY the repo in your working directory" fixes it — but a
+  structural fix (per-repo worktree isolation via mounts, or the read-only judge
+  container) is the durable answer.
+- Phase 3 finding (open): on resume, the driver keeps the **stored** instruction
+  and ignores the newly-given one even when *nothing* has been published yet
+  (the consistency guard is only needed once a repo has shipped). Workaround:
+  delete `tasks/<ticket>/` to start fresh. Consider allowing an instruction
+  update while `published` is empty.
 - Zod v4's `z.toJSONSchema()` stamps the draft 2020-12 meta-schema ref, which the
   bundled Claude Code CLI's ajv (draft-07) cannot resolve — fixed with
   `target: "draft-7"` in `harness/src/sdk.ts`.

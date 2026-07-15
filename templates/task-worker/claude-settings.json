@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
 
   "env": {
-    "OTEL_RESOURCE_ATTRIBUTES": "workspace={{TICKET_ID}},purpose={{PURPOSE}}"
+    "OTEL_RESOURCE_ATTRIBUTES": "workspace={{TICKET_ID}},work_type=auto,purpose={{PURPOSE}}"
   },
 
   "permissions": {

@@ -33,6 +33,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 import { z } from "zod";
+import { ticketFromWorktreesRoot } from "./config.js";
 
 export interface ReviewerVerdict {
   verdict: "approve" | "concerns";
@@ -148,14 +149,20 @@ export async function maybeConsultReviewer(
   let diffFile: string | null = null;
 
   try {
+    // Derived from the broker's OWN env (WORKTREES_ROOT), never from
+    // anything the publish request itself carries — same self-derivation
+    // posture as harness/src/telemetry.ts. Omitted (not sent as undefined)
+    // when null, so a legacy/single-repo deployment's request shape is
+    // byte-identical to pre-telemetry behavior.
+    const ticket = ticketFromWorktreesRoot();
     let req: unknown;
     if (diffBytes <= INLINE_THRESHOLD_BYTES) {
-      req = { diffInline: diff, title, untrustedBody: body };
+      req = { diffInline: diff, title, untrustedBody: body, ...(ticket ? { ticket } : {}) };
     } else {
       const dir = reviewerDiffDir();
       diffFile = path.join(dir, `${crypto.randomUUID()}.diff`);
       fs.writeFileSync(diffFile, diff, "utf8");
-      req = { diffPath: diffFile, title, untrustedBody: body };
+      req = { diffPath: diffFile, title, untrustedBody: body, ...(ticket ? { ticket } : {}) };
     }
 
     const raw = await sendToReviewer(socketPath, req, REVIEWER_TIMEOUT_MS, sig);

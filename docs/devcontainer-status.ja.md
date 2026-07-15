@@ -125,6 +125,59 @@ credential 不在のアサーションは Phase 0 セルフチェックで live 
    agent-orchestration.md、architecture.md、agent-roles.md、
    egress-selfcheck-per-role.md、README 各語版)自体が M4 の finalize である。
 
+9. チケット単位の OTEL telemetry(workspace/work_type/role の attribution)
+   — **実装 2026-07-15(live 検証は未実施)**。コンテナ化された coder 経路
+   (worker/orchestrator/reviewer)がこれまで telemetry を一切送れなかった
+   ギャップを埋める: SDK セッションは意図的にユーザー settings を読まない
+   (`settingSources` は `'user'` を含まない)し、`caged` ネットワークは
+   `internal: true` でホスト側 collector へのルートが無い。修正: **2つ目の
+   意図的に開いた** `internal: true` ネットワーク `mrw-telemetry`
+   (external、`scripts/devcontainer-up.sh` が idempotent に作成)を追加し、
+   兄弟リポジトリ `claude-code-monitoring` スタックの `otel-collector`
+   サービス**だけ**に到達可能にする — 新しいインターネットへのルートは
+   増えず、`caged` と同じ fail-closed-by-topology の原則を踏襲する。
+   参加するのは worker・orchestrator・reviewer のみで、**broker と
+   egress-proxy は意図的に参加しない** — telemetry の attribution は
+   coder セッション側の関心事であって publish 経路の関心事ではなく、
+   broker/proxy は従来どおり最小限のまま信頼される。attribution の伝播は
+   ワイヤ文字列の転送ではなく**自己組成**による: 各セッションは、自身が
+   構成上すでに信頼できる ticket 値から自分自身で `OTEL_RESOURCE_ATTRIBUTES`
+   を組み立てる(`harness/src/telemetry.ts` の `ticketFromRepoDir()` /
+   `telemetryEnv()`。`broker/src/config.ts` の `ticketFromWorktreesRoot()`
+   と `reviewer/src/sdk.ts` の `reviewerTelemetryEnv()` に同型のロジックを
+   ローカルで再実装 — 3つの独立パッケージ/イメージであり、共有 import は
+   無い)。スキームは `workspace=<ticket または "unlabeled">,work_type=<
+   MRW_WORK_TYPE で上書き可、既定 "feature">,role=<worker|plan|review|spine|
+   reviewer>`。bare-name の文字集合(英数字・`._-`)から外れる値は、
+   文字を削って整形するのではなく**拒否**し、`unlabeled`/`feature` に
+   フォールバックする — `k=v,k=v` という attribute 構文を壊したり、
+   別チケットの値と衝突したりするリスクを避けるため。**設計として
+   fail-open**(publish 経路とは逆の姿勢): collector が不在なら OTLP
+   export は静かに no-op するだけで、ステップをブロック・遅延させない。
+   **受容リスク**: telemetry に参加する3つのケージのいずれも、ローカルの
+   collector/Loki に偽データを送ったりフラッディングしたりできる —
+   影響範囲がローカルの monitoring スタックであって、インターネットや
+   publish 経路ではないため受容する。あわせて、broker の助言 reviewer
+   consult(`broker/src/reviewer.ts`)のリクエストにも任意の `ticket`
+   フィールドを追加した(`reviewer/src/types.ts` の
+   `ReviewerRequestSchema`。`.strict()` は維持、同じ bare-name 正規表現)。
+   これは broker 自身の env から導出され、coder のリクエストからではない
+   ため、role=reviewer のセッションも正しいチケットに attribution される。
+   静的検証: `harness/test/telemetry.test.ts`(新規、`ticketFromRepoDir`/
+   `telemetryEnv` の accept/reject)と `reviewer/test/types.test.ts`
+   (新規 — reviewer パッケージにはこれまでテスト基盤が無かった。`tsx` が
+   既存の devDependency だったため、`harness/` と同じ
+   `node --import tsx --test` パターンで新規に配線)がともに green、
+   `harness`/`broker`/`reviewer` はすべて typecheck クリーン、
+   `docker compose config -q` は新しい `external: true` ネットワークを
+   解決できる。`broker/src/config.ts` の `ticketFromWorktreesRoot()` は
+   (M4 時点で既存の broker/reviewer テスト基盤ギャップのとおり)接続する
+   パッケージテスト基盤が無く、`broker/` の他の部分と同様 live 検証に
+   委ねる。live 検証(ネットワーク到達性、Loki で `workspace=<ticket>` が
+   `role` ごとに分かれて出ること、monitoring スタック停止時の fail-open
+   挙動)は**未実施** — この変更が依存する `claude-code-monitoring` 側の
+   対応版とあわせて行う。
+
 M1 の初回 boot 摩擦(すべて live で発見、静的検査ではゼロ):
 - `:ro` の harness bind に重ねた named volume は**ホスト側** node_modules(darwin
   バイナリ・ホスト uid 所有)から初期化される → `npm ci` が EACCES。修正: 両ケージが

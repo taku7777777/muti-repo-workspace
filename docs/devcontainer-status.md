@@ -132,6 +132,57 @@ Phase 0 self-check):
    agent-roles.md, egress-selfcheck-per-role.md, and the READMEs) is the M4
    finalization itself.
 
+9. Per-ticket OTEL telemetry (workspace/work_type/role attribution) —
+   **BUILT 2026-07-15 (live validation pending)**. Closes the gap that the
+   containerized coder path (worker/orchestrator/reviewer) sent NO telemetry
+   at all: SDK sessions deliberately don't read user settings
+   (`settingSources` excludes `'user'`), and the `caged` network is
+   `internal: true` with no route to the host collector. Fix: a SECOND,
+   deliberately-opened `internal: true` network, `mrw-telemetry` (external,
+   created idempotently by `scripts/devcontainer-up.sh`), reaching **ONLY**
+   the sibling `claude-code-monitoring` stack's `otel-collector` service —
+   no new internet route, same fail-closed-by-topology primitive as `caged`.
+   Only the worker, orchestrator, and reviewer join it; **the broker and
+   egress-proxy deliberately do NOT** — telemetry attribution is a
+   coder-session concern, not a publish-path one, and the broker/proxy stay
+   exactly as trusted/minimal as before. Attribution is propagated by
+   SELF-DERIVATION, never by forwarding a wire string: each session composes
+   its own `OTEL_RESOURCE_ATTRIBUTES` from a ticket value it already trusts
+   by construction (`harness/src/telemetry.ts`'s `ticketFromRepoDir()` /
+   `telemetryEnv()`, mirrored locally in `broker/src/config.ts`'s
+   `ticketFromWorktreesRoot()` and `reviewer/src/sdk.ts`'s
+   `reviewerTelemetryEnv()` — three separate packages/images, no shared
+   import). The scheme is `workspace=<ticket-or-"unlabeled">,work_type=<
+   MRW_WORK_TYPE override, default "feature">,role=<worker|plan|review|spine|
+   reviewer>`; any value outside a bare-name charset (letters/digits/`._-`)
+   is rejected rather than sanitized-by-stripping, degrading to `unlabeled`/
+   `feature` instead of risking a value that could break the `k=v,k=v`
+   attribute syntax or collide with another ticket's. **Fail-open by
+   design** (the opposite posture from the publish path): if the collector
+   is absent, OTLP export silently no-ops rather than blocking or slowing a
+   step. **Accepted risk**: any of the three telemetry-joined cages could
+   send fake data into, or flood, the local collector/Loki — accepted
+   because the blast radius is a local monitoring stack, not the internet
+   or the publish path. Also threaded: the broker's advisory reviewer
+   consult (`broker/src/reviewer.ts`) now includes an optional `ticket`
+   field in its request to the reviewer (`reviewer/src/types.ts`'s
+   `ReviewerRequestSchema`, `.strict()`-preserved, same bare-name regex),
+   derived from the broker's OWN env, never the coder's request — so
+   role=reviewer sessions attribute to the right ticket too. Static
+   validation: `harness/test/telemetry.test.ts` (new, `ticketFromRepoDir`/
+   `telemetryEnv` accept/reject) and `reviewer/test/types.test.ts` (new —
+   the reviewer package had no test infra before this; wired with `tsx`,
+   already a devDependency, via the same `node --import tsx --test` pattern
+   `harness/` uses) both green, `harness`/`broker`/`reviewer` all typecheck
+   clean, `docker compose config -q` resolves the new `external: true`
+   network. `broker/src/config.ts`'s `ticketFromWorktreesRoot()` has no
+   package test infra to attach to (per M4's existing broker/reviewer test
+   gap) and is left to live verification, same as the rest of `broker/`.
+   Live validation (network reachability, `workspace=<ticket>` showing up in
+   Loki broken out by `role`, fail-open behavior with the monitoring stack
+   down) is **NOT YET DONE** — see the companion `claude-code-monitoring`
+   change this depends on.
+
 M1 first-boot friction found and fixed (all live, none static):
 - A named volume layered over the `:ro` harness bind initializes from the
   HOST's `node_modules` (darwin binaries, host-uid ownership) → `npm ci`

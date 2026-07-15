@@ -26,6 +26,36 @@ import { z } from "zod";
 
 export const REVIEWER_MODEL = process.env.REVIEWER_MODEL ?? "sonnet";
 
+// Same bare-name shape as harness/src/telemetry.ts's SAFE_ATTR_VALUE and
+// broker/src/config.ts's SAFE_TICKET — safe to embed in an
+// OTEL_RESOURCE_ATTRIBUTES `k=v,k=v` string. Reimplemented locally (not
+// imported — the reviewer is its own package/image, same reasoning as
+// harness/src/sdk.ts's header) rather than pulled from harness/.
+const SAFE_ATTR_VALUE = /^[A-Za-z0-9._-]{1,100}$/;
+
+function sanitizeAttrValue(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return SAFE_ATTR_VALUE.test(value) ? value : null;
+}
+
+/**
+ * Self-composed OTEL_RESOURCE_ATTRIBUTES for this process's ONE session
+ * type, mirroring harness/src/telemetry.ts's telemetryEnv() but local to
+ * this package: `ticket` is the broker-derived value threaded through
+ * ReviewerRequest (never anything the coder's own title/body carried —
+ * those stay in the prompt only), `role` is always "reviewer" here.
+ * `work_type` follows the same MRW_WORK_TYPE-override-with-fallback
+ * contract as the harness/broker sides.
+ */
+export function reviewerTelemetryEnv(ticket: string | null | undefined): NodeJS.ProcessEnv {
+  const workspace = sanitizeAttrValue(ticket) ?? "unlabeled";
+  const workType = sanitizeAttrValue(process.env.MRW_WORK_TYPE) ?? "feature";
+  return {
+    ...process.env,
+    OTEL_RESOURCE_ATTRIBUTES: `workspace=${workspace},work_type=${workType},role=reviewer`,
+  };
+}
+
 // The diff/title/body are entirely IN-PROMPT — there is no repo mounted here
 // and nothing this session should ever read or write. `tools: []` clears the
 // base tool set; `disallowedTools` denies every built-in defensively on top
@@ -86,7 +116,7 @@ function buildOptions(extra: Partial<Options>): Options {
 export async function runStructuredQuery<T>(
   schema: z.ZodType<T>,
   prompt: string,
-  opts: { abortController?: AbortController } = {},
+  opts: { abortController?: AbortController; env?: NodeJS.ProcessEnv } = {},
 ): Promise<T> {
   const q = query({
     prompt,
@@ -97,6 +127,11 @@ export async function runStructuredQuery<T>(
         schema: z.toJSONSchema(schema, { target: "draft-7" }),
       },
       ...(opts.abortController ? { abortController: opts.abortController } : {}),
+      // Overrides buildOptions()'s plain `env: process.env` default with the
+      // caller's self-composed telemetry env (reviewerTelemetryEnv()) when
+      // given — same `...extra` override contract as harness/src/sdk.ts's
+      // baseOptions().
+      ...(opts.env ? { env: opts.env as Record<string, string | undefined> } : {}),
     }),
   });
 

@@ -32,6 +32,39 @@ export const WORKTREES_ROOT = path.resolve(
   process.env.BROKER_WORKTREES_DIR ?? path.join(WORKSPACE_ROOT, "repositories"),
 );
 
+// Same bare-name shape harness/src/telemetry.ts and workerd/protocol.ts's
+// BARE_NAME use: letters, digits, dot, underscore, hyphen, 1-100 chars —
+// safe to embed in an OTEL_RESOURCE_ATTRIBUTES `k=v,k=v` string.
+const SAFE_TICKET = /^[A-Za-z0-9._-]{1,100}$/;
+
+/**
+ * Derive the ticket this broker instance is serving from ITS OWN env
+ * (WORKTREES_ROOT, set by the operator/compose file — never from anything
+ * a publish request carries), when WORKTREES_ROOT sits exactly at
+ * .../tasks/<ticket>/repositories. Returns null for a generic
+ * `repositories/` root (single-repo / non-per-ticket deployment) or any
+ * shape that doesn't match, so a malformed/unexpected value degrades to
+ * "no ticket attribution" rather than a wrong one.
+ *
+ * Pure and self-contained (no fs/network) — mirrors harness/src/exec.ts's
+ * deriveTicketRepo() layout check and harness/src/telemetry.ts's
+ * ticketFromRepoDir(), reimplemented here because the broker cannot import
+ * harness/ (separate package, separate image).
+ */
+export function ticketFromWorktreesRoot(): string | null {
+  const segments = WORKTREES_ROOT.split(path.sep).filter((s) => s.length > 0);
+  for (let i = segments.length - 1; i >= 0; i--) {
+    if (segments[i] !== "tasks") continue;
+    const ticket = segments[i + 1];
+    const reposLiteral = segments[i + 2];
+    if (ticket === undefined || reposLiteral !== "repositories") continue;
+    if (segments.length !== i + 3) continue; // must END at .../repositories
+    if (!SAFE_TICKET.test(ticket)) continue;
+    return ticket;
+  }
+  return null;
+}
+
 /** The coder-writable tree(s) a trusted policy file must NEVER live inside. In the
  *  container deployment set BROKER_CODER_TREE to the mounted workspace path
  *  (e.g. /workspaces/muti-repo-workspace); on a host process it self-locates. */

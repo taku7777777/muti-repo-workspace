@@ -50,6 +50,42 @@ assert_eq "sed_escape: ampersand" 'a\&b' "$(sed_escape 'a&b')"
 assert_eq "sed_escape: pipe (our delimiter)" 'a\|b' "$(sed_escape 'a|b')"
 assert_eq "sed_escape: backslash" 'a\\b' "$(sed_escape 'a\b')"
 
+# --- canonical paths / config failure semantics -------------------------------
+canon_td="$(mktemp -d)"
+mkdir -p "$canon_td/real"
+ln -s "$canon_td/real" "$canon_td/link"
+canon_real="$(cd "$canon_td/real" && pwd -P)"
+assert_eq "canonicalize_path: strips trailing slash" "$canon_real" "$(canonicalize_path "$canon_td/real///")"
+assert_eq "canonicalize_path: resolves symlinks" "$canon_real" "$(canonicalize_path "$canon_td/link")"
+assert_eq "canonicalize_path: preserves missing suffix" "$canon_real/new/deep" "$(canonicalize_path "$canon_td/link/new/deep")"
+canon_try() ( canonicalize_path "$1" )
+reject_tasks_try() ( reject_tasks_path "$1" )
+assert_status "canonicalize_path: rejects relative paths" 1 canon_try "relative/path"
+assert_status "canonicalize_path: rejects dotdot in missing suffix" 1 canon_try "$canon_td/missing/../escape"
+assert_status "config validation: rejects tasks segment" 1 reject_tasks_try "$canon_td/tasks/config"
+
+mkdir -p "$canon_td/bad" "$canon_td/missing"
+printf '{bad json\n' > "$canon_td/bad/workspace.json"
+assert_status "state_root: invalid workspace JSON fails closed" 1 \
+  bash -c '. "$1/scripts/lib/common.sh"; MRW_CONFIG_DIR="$2" state_root' _ "$ROOT" "$canon_td/bad"
+assert_status "config_dir: invalid workspace JSON fails closed" 1 \
+  bash -c '. "$1/scripts/lib/common.sh"; MRW_CONFIG_DIR="$2" config_dir' _ "$ROOT" "$canon_td/bad"
+assert_eq "state_root: missing workspace JSON uses config base" "$(cd "$canon_td" && pwd -P)" \
+  "$(MRW_CONFIG_DIR="$canon_td/missing" state_root)"
+
+assert_eq "compose_project_name: legacy preserves historical project" "mrw-phase0" \
+  "$(MRW_CONFIG_DIR="$ROOT/config" compose_project_name)"
+mkdir -p "$canon_td/workspace/.mrw"
+printf '{}\n' > "$canon_td/workspace/.mrw/workspace.json"
+compose_base="$(cd "$canon_td/workspace" && pwd -P)"
+compose_expected="mrw-$(printf '%s' "$compose_base" | shasum -a 256 | cut -c1-12)"
+compose_first="$(MRW_CONFIG_DIR="$canon_td/workspace/.mrw" compose_project_name)"
+compose_second="$(MRW_CONFIG_DIR="$canon_td/workspace/.mrw" compose_project_name)"
+assert_match "compose_project_name: workspace uses mrw-prefixed hash" '^mrw-[0-9a-f]{12}$' "$compose_first"
+assert_eq "compose_project_name: workspace value derives from config_base" "$compose_expected" "$compose_first"
+assert_eq "compose_project_name: workspace value is deterministic" "$compose_first" "$compose_second"
+rm -rf "$canon_td"
+
 # --- render_template ------------------------------------------------------------
 tpl="$(mktemp)"
 printf 'id={{TICKET_ID}} dir={{TASK_DIR}} title={{TITLE}}\n' > "$tpl"
@@ -59,6 +95,40 @@ assert_eq "render_template: basic + special chars" \
   'id=T-1 dir=/w/tasks/T-1 title=Fix & improve | stuff' "$out"
 out="$(render_template "$tpl")"
 assert_eq "render_template: unset vars become empty" 'id= dir= title=' "$out"
+
+# Agent settings must pin the resolved workspace config directory in both the
+# tool permission layer and the OS sandbox layer.
+settings_config_td="$(mktemp -d)"
+CONFIG_DIR="$(canonicalize_path "$settings_config_td")"
+export CONFIG_DIR
+for role in task-worker task-orchestrator; do
+  settings_out="$(render_template "$ROOT/templates/$role/claude-settings.json")"
+  assert_status "$role settings: config_dir Edit deny is rendered" 0 \
+    bash -c 'printf "%s" "$1" | jq -e --arg v "Edit(/$2/**)" ".permissions.deny | index(\$v) != null" >/dev/null' \
+    _ "$settings_out" "$CONFIG_DIR"
+  assert_status "$role settings: config_dir denyWrite is rendered" 0 \
+    bash -c 'printf "%s" "$1" | jq -e --arg v "$2" ".sandbox.filesystem.denyWrite | index(\$v) != null" >/dev/null' \
+    _ "$settings_out" "$CONFIG_DIR"
+done
+unset CONFIG_DIR
+rm -rf "$settings_config_td"
+
+# --add-write must reject config_dir (and descendants) before task lookup,
+# while an unrelated absolute path proceeds to the ordinary task lookup.
+sandbox_guard_td="$(mktemp -d)"
+mkdir -p "$sandbox_guard_td/.mrw/child" "$sandbox_guard_td/outside"
+printf '{}\n' > "$sandbox_guard_td/.mrw/workspace.json"
+guard_out="$(MRW_CONFIG_DIR="$sandbox_guard_td/.mrw" bash "$ROOT/scripts/update-task-sandbox.sh" TST-1 --add-write "$sandbox_guard_td/.mrw/child" 2>&1)"
+guard_status=$?
+assert_eq "update-task-sandbox: config_dir descendant is rejected" 1 "$guard_status"
+assert_match "update-task-sandbox: config_dir rejection names protected directory" \
+  'refusing --add-write into the workspace config directory' "$guard_out"
+outside_out="$(MRW_CONFIG_DIR="$sandbox_guard_td/.mrw" bash "$ROOT/scripts/update-task-sandbox.sh" TST-1 --add-write "$sandbox_guard_td/outside" 2>&1)"
+outside_status=$?
+assert_eq "update-task-sandbox: outside config_dir reaches task lookup" 1 "$outside_status"
+assert_match "update-task-sandbox: outside config_dir retains ordinary missing-task failure" \
+  'no worker settings for task TST-1' "$outside_out"
+rm -rf "$sandbox_guard_td"
 rm -f "$tpl"
 
 # --- template_for (override precedence) -----------------------------------------
@@ -109,9 +179,11 @@ assert_status "validate_ticket_id: rejects embedded newline" 1 vti "$(printf 'A-
 # Invoke the ACTUAL hook against a temp workspace so a regression in the hook
 # itself is caught (the previous test exercised an inline copy that could not).
 hookdir="$(mktemp -d)"
-mkdir -p "$hookdir/.githooks" "$hookdir/config"
+mkdir -p "$hookdir/.githooks" "$hookdir/config" "$hookdir/scripts/lib"
 cp "$ROOT/.githooks/pre-push" "$hookdir/.githooks/pre-push"
-run_hook() { bash "$hookdir/.githooks/pre-push" origin "$1"; }
+cp "$ROOT/scripts/lib/common.sh" "$hookdir/scripts/lib/common.sh"
+hook_global="$(mktemp)"
+run_hook() { GIT_CONFIG_GLOBAL="$hook_global" bash "$hookdir/.githooks/pre-push" origin "$1"; }
 
 # allowed_push_orgs set: org enforced, host enforced.
 printf '{"allowed_push_orgs":["good-org"],"allowed_push_hosts":["github.com"]}\n' > "$hookdir/config/workspace.json"
@@ -125,7 +197,109 @@ assert_status "pre-push: unparsable URL blocked" 1 run_hook 'not-a-url'
 printf '{"allowed_push_orgs":[],"allowed_push_hosts":["github.com"]}\n' > "$hookdir/config/workspace.json"
 assert_status "pre-push: empty orgs still allows allowed host" 0 run_hook 'https://github.com/anyone/repo.git'
 assert_status "pre-push: empty orgs still BLOCKS bad host" 1 run_hook 'https://evil.example/anyone/repo.git'
-rm -rf "$hookdir"
+
+# A gitdir-scoped baked global include wins even when cwd cannot walk up to it.
+baked_cfg="$(mktemp -d)"
+printf '{"allowed_push_orgs":["baked-org"],"allowed_push_hosts":["github.com"]}\n' > "$baked_cfg/workspace.json"
+git_fixture="$(mktemp -d)"
+git -C "$git_fixture" init -q
+git config --file "$hookdir/baked-include" mrw.configDir "$baked_cfg/"
+git config --file "$hook_global" "includeIf.gitdir:$git_fixture/.path" "$hookdir/baked-include"
+assert_status "pre-push: uses baked mrw.configDir" 0 \
+  bash -c 'cd "$1" && GIT_CONFIG_GLOBAL="$3" bash "$2/.githooks/pre-push" origin https://github.com/baked-org/repo.git' _ "$git_fixture" "$hookdir" "$hook_global"
+attacker_cfg="$(mktemp -d)"
+printf '{"allowed_push_orgs":["evil-org"],"allowed_push_hosts":["github.com"]}\n' > "$attacker_cfg/workspace.json"
+git -C "$git_fixture" config mrw.configDir "$attacker_cfg"
+assert_status "pre-push: blocks repo-local configDir spoof" 1 \
+  bash -c 'cd "$1" && GIT_CONFIG_GLOBAL="$3" bash "$2/.githooks/pre-push" origin https://github.com/baked-org/repo.git' _ "$git_fixture" "$hookdir" "$hook_global"
+assert_status "pre-push: local spoof allowlist does not win" 1 \
+  bash -c 'cd "$1" && GIT_CONFIG_GLOBAL="$3" bash "$2/.githooks/pre-push" origin https://github.com/evil-org/repo.git' _ "$git_fixture" "$hookdir" "$hook_global"
+
+git -C "$git_fixture" config --unset-all mrw.configDir
+git -C "$git_fixture" config extensions.worktreeConfig true
+git -C "$git_fixture" config --worktree mrw.configDir "$attacker_cfg"
+assert_status "pre-push: blocks worktree configDir spoof" 1 \
+  bash -c 'cd "$1" && GIT_CONFIG_GLOBAL="$3" bash "$2/.githooks/pre-push" origin https://github.com/baked-org/repo.git' _ "$git_fixture" "$hookdir" "$hook_global"
+git -C "$git_fixture" config --worktree --unset-all mrw.configDir
+
+# Two gitdir-scoped global includes retain independent per-workspace
+# allowlists. This catches a shared, last-setup-wins include target.
+scope_root_raw="$(mktemp -d)"
+scope_root="$(cd "$scope_root_raw" && pwd -P)"
+scope_global="$(mktemp)"
+for scope in A B; do
+  mkdir -p "$scope_root/$scope/config" "$scope_root/$scope/repo"
+  git -C "$scope_root/$scope/repo" init -q
+  org="$(printf '%s' "$scope" | tr '[:upper:]' '[:lower:]')-org"
+  printf '{"allowed_push_orgs":["%s"],"allowed_push_hosts":["github.com"]}\n' "$org" \
+    > "$scope_root/$scope/config/workspace.json"
+  git config --file "$scope_root/$scope/include" mrw.configDir "$scope_root/$scope/config"
+  git config --file "$scope_global" "includeIf.gitdir:$scope_root/$scope/.path" "$scope_root/$scope/include"
+done
+assert_status "pre-push: workspace A uses A allowlist" 0 \
+  bash -c 'cd "$1/A/repo" && GIT_CONFIG_GLOBAL="$3" bash "$2/.githooks/pre-push" origin https://github.com/a-org/repo.git' _ "$scope_root" "$hookdir" "$scope_global"
+assert_status "pre-push: workspace A rejects B allowlist" 1 \
+  bash -c 'cd "$1/A/repo" && GIT_CONFIG_GLOBAL="$3" bash "$2/.githooks/pre-push" origin https://github.com/b-org/repo.git' _ "$scope_root" "$hookdir" "$scope_global"
+assert_status "pre-push: workspace B uses B allowlist" 0 \
+  bash -c 'cd "$1/B/repo" && GIT_CONFIG_GLOBAL="$3" bash "$2/.githooks/pre-push" origin https://github.com/b-org/repo.git' _ "$scope_root" "$hookdir" "$scope_global"
+assert_status "pre-push: workspace B rejects A allowlist" 1 \
+  bash -c 'cd "$1/B/repo" && GIT_CONFIG_GLOBAL="$3" bash "$2/.githooks/pre-push" origin https://github.com/a-org/repo.git' _ "$scope_root" "$hookdir" "$scope_global"
+
+# Without the baked value, a legitimate ancestor .mrw is the fallback.
+walk_ws="$(mktemp -d)"
+walk_global="$(mktemp)"
+mkdir -p "$walk_ws/.mrw" "$walk_ws/repo"
+printf '{"allowed_push_orgs":["walk-org"],"allowed_push_hosts":["github.com"]}\n' > "$walk_ws/.mrw/workspace.json"
+assert_status "pre-push: falls back to ancestor walk-up" 0 \
+  bash -c 'cd "$1/repo" && GIT_CONFIG_GLOBAL="$3" bash "$2/.githooks/pre-push" origin https://github.com/walk-org/repo.git' _ "$walk_ws" "$hookdir" "$walk_global"
+
+# A repo with no baked key, no walk-up config, and no tool-home legacy config
+# remains fail-open so setup is not required merely to push an unrelated repo.
+legacy_hookdir="$(mktemp -d)"
+legacy_repo="$(mktemp -d)"
+mkdir -p "$legacy_hookdir/.githooks" "$legacy_hookdir/scripts/lib"
+cp "$ROOT/.githooks/pre-push" "$legacy_hookdir/.githooks/pre-push"
+cp "$ROOT/scripts/lib/common.sh" "$legacy_hookdir/scripts/lib/common.sh"
+git -C "$legacy_repo" init -q
+legacy_output="$(cd "$legacy_repo" && GIT_CONFIG_GLOBAL="$walk_global" bash "$legacy_hookdir/.githooks/pre-push" origin https://github.com/any-org/repo.git 2>&1)"
+legacy_status=$?
+assert_eq "pre-push: missing legacy config fails open" 0 "$legacy_status"
+assert_match "pre-push: missing legacy config warns" 'WARNING: cannot read .*workspace.json \(missing file\); allowing push' "$legacy_output"
+rm -rf "$legacy_hookdir" "$legacy_repo"
+
+printf '{broken\n' > "$baked_cfg/workspace.json"
+git -C "$git_fixture" config --unset-all mrw.configDir
+assert_status "pre-push: malformed config fails closed" 1 \
+  bash -c 'cd "$1" && GIT_CONFIG_GLOBAL="$3" bash "$2/.githooks/pre-push" origin https://github.com/baked-org/repo.git' _ "$git_fixture" "$hookdir" "$hook_global"
+rm -f "$baked_cfg/workspace.json"
+assert_status "pre-push: missing baked config fails closed" 1 \
+  bash -c 'cd "$1" && GIT_CONFIG_GLOBAL="$3" bash "$2/.githooks/pre-push" origin https://github.com/baked-org/repo.git' _ "$git_fixture" "$hookdir" "$hook_global"
+rm -rf "$baked_cfg" "$attacker_cfg" "$git_fixture" "$walk_ws" "$scope_root"
+rm -rf "$hookdir" "$hook_global" "$scope_global" "$walk_global"
+
+# --- CLI pure helpers ---------------------------------------------------------
+canon_file_td="$(mktemp -d)"
+mkdir -p "$canon_file_td/real"
+ln -s "$canon_file_td/real" "$canon_file_td/link"
+printf 'not a directory\n' > "$canon_file_td/real/file"
+canon_file_input="$canon_file_td/link/file/child"
+shell_canon_file="$(canonicalize_path "$canon_file_input")"
+js_canon_file="$(node --input-type=module -e "import { canonicalizePath } from '$ROOT/cli/mrw.mjs'; process.stdout.write(canonicalizePath(process.argv[1]))" "$canon_file_input")"
+assert_eq "canonicalize path: shell and JS preserve regular-file suffix equally" "$shell_canon_file" "$js_canon_file"
+rm -rf "$canon_file_td"
+
+assert_status "mrw stripControlChars: removes CSI/OSC/C0" 0 node --input-type=module -e \
+  "import { stripControlChars } from '$ROOT/cli/mrw.mjs'; const s='ok\\x1b[31mRED\\x1b[0m\\x1b]0;secret\\x07!\\x01'; if (stripControlChars(s) !== 'okRED!') process.exit(1)"
+
+legacy_config_output="$(MRW_CONFIG_DIR="$ROOT/config" node "$ROOT/cli/mrw.mjs" config)"
+assert_match "mrw config: reports legacy compose project" '^compose_project: mrw-phase0$' "$legacy_config_output"
+compose_cli_td="$(mktemp -d)"
+mkdir -p "$compose_cli_td/workspace/.mrw"
+printf '{}\n' > "$compose_cli_td/workspace/.mrw/workspace.json"
+shell_project="$(MRW_CONFIG_DIR="$compose_cli_td/workspace/.mrw" compose_project_name)"
+cli_project="$(MRW_CONFIG_DIR="$compose_cli_td/workspace/.mrw" node "$ROOT/cli/mrw.mjs" config | sed -n 's/^compose_project: //p')"
+assert_eq "compose project: shell and CLI workspace implementations agree" "$shell_project" "$cli_project"
+rm -rf "$compose_cli_td"
 
 # --- worktree_gitdir (real git fixture) ------------------------------------------
 # The resolved gitdir feeds the worker's config.worktree denyWrite pin — a wrong
@@ -310,6 +484,12 @@ assert_status "mrw chat (no --ticket): non-zero exit (propagated from chat-up.sh
 
 assert_status "mrw task-up: prints the 'mrw chat' hint on success (source check)" 0 \
   grep -q 'Tip: chat with the spine' "$ROOT/cli/mrw.mjs"
+task_help_out="$(cd "$ROOT" && node "$ROOT/cli/mrw.mjs" task-up --help 2>&1)"
+assert_status "mrw task-up --help: exits zero" 0 \
+  bash -c "cd '$ROOT' && node '$ROOT/cli/mrw.mjs' task-up --help >/dev/null 2>&1"
+assert_match "mrw task-up --help: prints task-up usage" "task-up --ticket" "$task_help_out"
+assert_status "mrw task-up --phase: missing value exits one" 1 \
+  bash -c "cd '$ROOT' && node '$ROOT/cli/mrw.mjs' task-up --ticket ABC-1 --phase >/dev/null 2>&1"
 
 rm -rf "$chat_fakebin"
 

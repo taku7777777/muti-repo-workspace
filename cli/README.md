@@ -29,11 +29,15 @@ checkout.
 3. `<toolHome>/config` (the legacy, single-workspace default).
 
 Resolution via (1) or (2) is **workspace mode**; via (3) is **legacy mode**.
-`mrw`, every host script (via `scripts/lib/common.sh`'s `config_dir()`), and
-`.githooks/pre-push` all implement this identically, so a `.mrw/` discovered
-by one is discovered the same way by the others. **With no `.mrw/` above the
-current directory and `MRW_CONFIG_DIR` unset, this is byte-identical to the
-pre-`.mrw/` behavior** (`config_dir == <toolHome>/config`).
+`mrw` and host scripts resolve this consistently via the CLI and
+`scripts/lib/common.sh`. During `mrw setup`, `setup-workspace.sh` bakes the
+canonical config path into workspace-scoped git config; `.githooks/pre-push`
+reads it through the matching `includeIf`, rejects repo-local/worktree copies
+as tampering, and fails closed if the explicit baked target is unusable. Its
+walk-up remains only as a compatibility fallback for legacy or
+not-yet-reconfigured workspaces. **With no `.mrw/` above the current
+directory and `MRW_CONFIG_DIR` unset, this is byte-identical to the pre-`.mrw/`
+behavior** (`config_dir == <toolHome>/config`).
 
 `state_root`'s default also changes shape slightly: it now defaults to the
 **workspace base** (in workspace mode, the directory that holds `.mrw/`; in
@@ -82,13 +86,22 @@ works the same from any cwd.
 | `mrw task-up --ticket <ID> [--repos a,b] [--title t] [--purpose p] [--url u] [--no-sandbox] [--yes] […]` | exec `scripts/create-workspace.sh --phase all --ticket <ID> […]`. `--url` is mapped to `--ticket-url`. A bare positional (`mrw task-up ABC-123`) is treated as the ticket ID when `--ticket` is omitted. |
 | `mrw task-up [--ticket <ID>] --from <ref> [--no-triage] […]` | fetches a ticket body via `scripts/lib/ticket-sources/<ticket_source>.sh fetch <ref>` (adapter chosen by `config/workspace.json`'s `.ticket_source`), then (unless `--no-triage`) auto-triages it — see below. |
 | `mrw task-up --ticket <ID> --body-file <path> [--no-triage] […]` | reads the ticket body from a local file instead of fetching it; otherwise behaves like `--from`. |
+| `mrw list [args...]` | exec `scripts/list-task.sh` |
+| `mrw close <TICKET_ID> [--force]` | exec `scripts/remove-workspace.sh` |
+| `mrw doctor [args...]` | exec `scripts/verify-workspace.sh` |
+| `mrw chat <TICKET_ID> [--repos a,b] [--purpose p] [--resume] [instruction...]` | exec `scripts/chat-up.sh` — Thread C chat frontend (`docs/mrw-chat.md`): Claude Code itself as the orchestrator chat UI, over a generated, pinned config (deny-posture `settings.json`, persona `CLAUDE.md`, `.mcp.json` spawning the `spined` MCP daemon). **Container-only** — refuses if the devcontainer stack (`orchestrator`) is not running. Renders `STATE_ROOT/chat/<TICKET_ID>/` (refusing any resolved path with a `tasks/` segment — worker-writable state must never hold this config), runs `spine-prepare` in-container (worktrees + a freshly-seeded ledger; never passes `--force`, so re-running against an already-prepared ticket is refused with guidance to use `--resume` instead), stamps directory trust, then opens `claude` inside the orchestrator container — a cmux tab if available (reusing a `/open-task`-created workspace of the same name, if one exists), otherwise the command is printed (and, on macOS, copied to the clipboard) for you to run yourself. `mrw task-up` prints this command as a hint on success; it never auto-launches it. |
+| `mrw serve [up]` `[--port N] [--no-open]` | boot the browser-approval page (compose profile `serve`, `--no-deps` — a running `broker` is never recreated); mints a fresh session token and prints (on macOS also opens) a tokened `http://localhost:<port>/?token=<token>` URL. Warns, but does not fail, if `broker` isn't running yet. |
+| `mrw serve down` | stop it: `docker compose --profile serve rm -sf serve` |
+| `mrw serve url` | reprint the tokened URL for an already-running `serve` container (reads its published port and session token back via `docker port`/`docker inspect`) |
+| `mrw serve status` | `docker compose ps serve` |
+| unknown subcommand | error + usage, exit 2 |
 
 ### `--from` / `--body-file` / `--no-triage` (ticket-up triage leaf)
 
 `task-up` can auto-fill `--title`/`--repos` and record a `work_type` from a
-ticket's text, via the harness's bounded, read-only, typed triage leaf
-(`harness/src/triage.ts`, run host-side, outside any cage — it never touches a
-repo checkout and can only Read/Grep/Glob, never Edit/Write/Bash).
+ticket's text, via the harness's bounded, tool-less, typed triage leaf
+(`harness/src/triage.ts`, run host-side with all built-in tools denied,
+`settingSources: []`, and an inert cwd — it never touches a repo checkout).
 
 - **Body resolution**, in priority: `--body-file <path>` (read a local file) >
   `--from <ref>` (adapter fetch) > none. A `--from` fetch failure (e.g. the
@@ -118,16 +131,6 @@ repo checkout and can only Read/Grep/Glob, never Edit/Write/Bash).
   template only if it doesn't already exist, and racing that write risks
   fighting its own idempotent scaffolding. `task-up` instead prints a note
   that the body was fetched, so you can paste it in yourself.
-| `mrw list [args...]` | exec `scripts/list-task.sh` |
-| `mrw close <TICKET_ID> [--force]` | exec `scripts/remove-workspace.sh` |
-| `mrw doctor [args...]` | exec `scripts/verify-workspace.sh` |
-| `mrw chat <TICKET_ID> [--repos a,b] [--purpose p] [--resume] [instruction...]` | exec `scripts/chat-up.sh` — Thread C chat frontend (`docs/mrw-chat.md`): Claude Code itself as the orchestrator chat UI, over a generated, pinned config (deny-posture `settings.json`, persona `CLAUDE.md`, `.mcp.json` spawning the `spined` MCP daemon). **Container-only** — refuses if the devcontainer stack (`orchestrator`) is not running. Renders `STATE_ROOT/chat/<TICKET_ID>/` (refusing any resolved path with a `tasks/` segment — worker-writable state must never hold this config), runs `spine-prepare` in-container (worktrees + a freshly-seeded ledger; never passes `--force`, so re-running against an already-prepared ticket is refused with guidance to use `--resume` instead), stamps directory trust, then opens `claude` inside the orchestrator container — a cmux tab if available (reusing a `/open-task`-created workspace of the same name, if one exists), otherwise the command is printed (and, on macOS, copied to the clipboard) for you to run yourself. `mrw task-up` prints this command as a hint on success; it never auto-launches it. |
-| `mrw serve [up]` `[--port N] [--no-open]` | boot the browser-approval page (compose profile `serve`, `--no-deps` — a running `broker` is never recreated); mints a fresh session token and prints (on macOS also opens) a tokened `http://localhost:<port>/?token=<token>` URL. Warns, but does not fail, if `broker` isn't running yet. |
-| `mrw serve down` | stop it: `docker compose --profile serve rm -sf serve` |
-| `mrw serve url` | reprint the tokened URL for an already-running `serve` container (reads its published port and session token back via `docker port`/`docker inspect`) |
-| `mrw serve status` | `docker compose ps serve` |
-| unknown subcommand | error + usage, exit 2 |
-
 ## `mrw config --state-root`
 
 The active `config_dir`'s `workspace.json` (`<toolHome>/config/workspace.json`

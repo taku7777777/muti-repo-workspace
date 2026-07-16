@@ -32,6 +32,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$SCRIPT_DIR/lib/common.sh"
+export COMPOSE_PROJECT_NAME="$(compose_project_name)"
 # shellcheck source=lib/effects/cmux.sh
 . "$SCRIPT_DIR/lib/effects/cmux.sh"
 
@@ -331,7 +332,7 @@ dc exec -T \
 # (cmux_workspace_uuid_by_name). Degrades to printing (and, on macOS,
 # clipboard-copying) the command when cmux is absent — same fallback shape as
 # create-workspace.sh's own worker/orchestrator startup.
-CHAT_CMD_PRINTABLE="docker compose -f $(printf '%q' "$COMPOSE_FILE") exec -it -e CLAUDE_CONFIG_DIR=$CONTAINER_CHAT_HOME -w $(printf '%q' "$CONTAINER_CHAT_DIR") orchestrator claude"
+CHAT_CMD_PRINTABLE="docker compose -p $(printf '%q' "$COMPOSE_PROJECT_NAME") -f $(printf '%q' "$COMPOSE_FILE") exec -it -e CLAUDE_CONFIG_DIR=$CONTAINER_CHAT_HOME -w $(printf '%q' "$CONTAINER_CHAT_DIR") orchestrator claude"
 if $RESUME; then
   CHAT_CMD_PRINTABLE="$CHAT_CMD_PRINTABLE --continue"
 fi

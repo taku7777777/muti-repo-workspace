@@ -150,6 +150,8 @@ load_meta() {
 # generate_agent_settings <role: worker|orchestrator> <dest-file>
 generate_agent_settings() {
   local role="$1" dest="$2" template tmp
+  [ -n "${CONFIG_DIR:-}" ] || die "CONFIG_DIR must be set before generating agent settings"
+  # In legacy mode CONFIG_DIR equals WORKSPACE_ROOT/config, so this security pin intentionally duplicates the existing legacy pin.
   tmp="$(mktemp)"
   if [ "$SANDBOX" = "true" ]; then
     render_template "$WORKSPACE_ROOT/templates/task-$role/claude-settings.json" > "$tmp"

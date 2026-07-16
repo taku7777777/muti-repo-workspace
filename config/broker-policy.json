@@ -1,5 +1,5 @@
 {
-  "$note": "TRUSTED Phase 2 broker policy. This is the ONLY allowlist the publish broker reads at request time — it is NEVER loaded from the coder-writable config/workspace.json. It is baked into the broker image at build (a trusted moment) at /etc/mrw-broker/policy.json, so the runtime coder cannot alter it, and it must live OUTSIDE the coder-writable worktrees/workspace tree (the broker fail-closes otherwise). Keep allowed_push_orgs/allowed_push_hosts/branch_prefix in sync with config/workspace.json for your org.",
+  "$note": "TRUSTED Phase 2 broker policy. This is the ONLY allowlist the publish broker reads at request time — it is NEVER loaded from the coder-writable config/workspace.json. The active per-workspace config directory is bind-mounted read-only at runtime and this file is read from /etc/mrw-broker/config/broker-policy.json; it is not baked into the image. It must live OUTSIDE the coder-writable worktrees/workspace tree (the broker fail-closes otherwise). Keep allowed_push_orgs/allowed_push_hosts/branch_prefix in sync with workspace.json for your workspace.",
 
   "allowed_push_orgs": ["taku7777777"],
   "allowed_push_orgs_note": "GitHub orgs/users push may target. Empty = host-only (no org restriction). The broker enforces this IN-PROCESS; it does not depend on the pre-push hook or jq.",

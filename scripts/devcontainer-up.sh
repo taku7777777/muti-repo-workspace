@@ -21,6 +21,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$SCRIPT_DIR/lib/common.sh"
 
+export COMPOSE_PROJECT_NAME="$(compose_project_name)"
+
 KEYCHAIN_SERVICE="claude-code-oauth-token"
 
 if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
@@ -55,6 +57,11 @@ fi
 # / repos.json / purposes/ / broker-policy.json). Unset ⇒ compose falls back
 # to `../config` (the tool checkout) = legacy, byte-identical to Phase 1.
 _config_dir="$(config_dir)"
+_policy_file="$_config_dir/broker-policy.json"
+[ -e "$_policy_file" ] || die "broker policy not found: $_policy_file"
+[ -f "$_policy_file" ] || die "broker policy must be a regular file (not a directory): $_policy_file"
+require_cmd jq
+jq empty "$_policy_file" >/dev/null 2>&1 || die "invalid JSON in broker policy: $_policy_file"
 if [ "$_config_dir" != "$(workspace_root)/config" ]; then
   case "$_config_dir" in
     /*) export MRW_CONFIG_DIR="$_config_dir" ;;
@@ -67,5 +74,8 @@ fi
 # fails outright if it doesn't exist yet — create it here, internal-only,
 # same fail-closed shape as `caged` (docs/devcontainer-status.md item 10).
 docker network create --internal mrw-telemetry 2>/dev/null || true
+_telemetry_internal="$(docker network inspect -f '{{.Internal}}' mrw-telemetry 2>/dev/null || true)"
+[ "$_telemetry_internal" = "true" ] \
+  || die "mrw-telemetry network exists but is NOT internal (Internal='$_telemetry_internal') — refusing to start with a non-isolated telemetry network. Fix: docker network rm mrw-telemetry && docker network create --internal mrw-telemetry"
 
 exec docker compose -f .devcontainer/docker-compose.yml up -d "$@"

@@ -12,19 +12,37 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKSPACE_ROOT="$(dirname "$HOOK_DIR")"
+# shellcheck source=../scripts/lib/common.sh
+. "$WORKSPACE_ROOT/scripts/lib/common.sh"
 
-# Resolve the workspace config: a per-workspace .mrw/workspace.json found by
-# walking up from the pushing worktree (git runs the hook with cwd = the work
-# tree), else the tool checkout's config (legacy). Fail-open stays below.
-# This walk-up MUST match scripts/lib/common.sh's config_dir() and
-# cli/mrw.mjs's JS implementation exactly (see common.sh's config_dir doc
-# comment) — all three resolve the SAME config_dir for the same cwd/env.
+# setup-workspace.sh bakes the canonical config directory into a gitdir-scoped
+# include. Plain `git config --get` evaluates that includeIf (unlike
+# `--global --get`), after local/worktree copies of the key are rejected as
+# worker-writable tampering. This works even when state_root is outside the
+# workspace ancestry. Command-line `-c` / GIT_CONFIG_* injection is owned by
+# the operator launching push; workers cannot construct that push command.
+# A walk-up remains only for legacy/re-setup compatibility.
 # NOTE: the broker independently enforces allowed_push_orgs in-process from
 # broker-policy.json (the authoritative gate on the container path); this
 # hook is defence-in-depth for the native (non-containerized) push path.
-_cfg=""
-_d="$PWD"
-while [ "$_d" != "/" ]; do
+_spoof_local="$(git config --local --get mrw.configDir 2>/dev/null || true)"
+_spoof_worktree="$(git config --worktree --get mrw.configDir 2>/dev/null || true)"
+if [ -n "$_spoof_local" ] || [ -n "$_spoof_worktree" ]; then
+  echo "pre-push: BLOCKED: mrw.configDir found in repo-local/worktree git config (tampering — this key must only come from the setup-baked include file)." >&2
+  exit 1
+fi
+
+_cfg_dir="$(git config --get mrw.configDir 2>/dev/null || true)"
+if [ -n "$_cfg_dir" ]; then
+  _cfg_source="baked"
+  if ! _cfg_dir="$(canonicalize_path "$_cfg_dir")" || ! (reject_tasks_path "$_cfg_dir"); then
+    echo "pre-push: BLOCKED: invalid setup-baked mrw.configDir." >&2
+    exit 1
+  fi
+else
+  _cfg_source="legacy"
+  _d="$PWD"
+  while [ "$_d" != "/" ]; do
   # SECURITY: skip any .mrw/ under a tasks/ segment (worker-writable state) —
   # a worker could commit .mrw/workspace.json into its own worktree to spoof
   # this allowlist. The legit workspace .mrw/ is a sibling of tasks/, above
@@ -32,18 +50,38 @@ while [ "$_d" != "/" ]; do
   case "$_d" in
     */tasks|*/tasks/*) _d="$(dirname "$_d")"; continue ;;
   esac
-  if [ -f "$_d/.mrw/workspace.json" ]; then _cfg="$_d/.mrw/workspace.json"; break; fi
-  _d="$(dirname "$_d")"
-done
-CONFIG="${_cfg:-$WORKSPACE_ROOT/config/workspace.json}"
+    if [ -f "$_d/.mrw/workspace.json" ]; then
+      _cfg_dir="$(canonicalize_path "$_d/.mrw")"
+      reject_tasks_path "$_cfg_dir"
+      _cfg_source="walkup"
+      break
+    fi
+    _d="$(dirname "$_d")"
+  done
+fi
+CONFIG_DIR="${_cfg_dir:-$(canonicalize_path "$WORKSPACE_ROOT/config")}"
+CONFIG="$CONFIG_DIR/workspace.json"
 
 REMOTE_URL="${2:-}"
 
-# Fail open (warn, allow) when the config cannot be read — a broken hook
-# must not lock users out of their own repositories.
-if [ ! -f "$CONFIG" ] || ! command -v jq >/dev/null 2>&1; then
-  echo "pre-push: WARNING: cannot read $CONFIG (missing file or jq not installed); allowing push." >&2
+# jq absence is an environment problem and remains fail-open for every source.
+if ! command -v jq >/dev/null 2>&1; then
+  echo "pre-push: WARNING: cannot read $CONFIG (jq not installed); allowing push." >&2
   exit 0
+fi
+
+if [ ! -f "$CONFIG" ]; then
+  if [ "$_cfg_source" = "baked" ]; then
+    echo "pre-push: BLOCKED: setup-baked config is missing $CONFIG." >&2
+    exit 1
+  fi
+  echo "pre-push: WARNING: cannot read $CONFIG (missing file); allowing push." >&2
+  exit 0
+fi
+
+if ! jq empty "$CONFIG" >/dev/null 2>&1; then
+  echo "pre-push: BLOCKED: invalid JSON in $CONFIG." >&2
+  exit 1
 fi
 
 ALLOWED_ORGS="$(jq -r '(.allowed_push_orgs // []) | join(" ")' "$CONFIG")"

@@ -1,6 +1,6 @@
 # `mrw` CLI — ツールを状態から切り離す(設計メモ)
 
-**Status: DESIGN PROPOSAL(未実装)。** [architecture.md](architecture.md)
+**Status: Phase 1–2 は実装済み(`plan.md` 参照)。本稿は当初の設計記録です。** [architecture.md](architecture.md)
 (セキュリティ層)と [agent-orchestration.md](agent-orchestration.md)
 (コンテナ制御プレーン)の姉妹編。このメモは `muti-repo-workspace` が
 ワークスペースそのもの*であること*をやめ、指し示したワークスペースディレクトリに
@@ -95,16 +95,11 @@ Git 方式のディスカバリ。`mrw` は cwd から上へ辿って `.mrw/conf
 ツールはこれで2つの独立したソースになる — が、素朴な分割が隠している3つの
 複雑な点がある:
 
-- **`config/broker-policy.json` はビルド時に broker イメージへ焼き込まれており**
-  (`broker.Dockerfile`: `COPY config/broker-policy.json …`)、push 先の org/host を
-  強制する*権威ある*ポイントである(broker がプロセス内で強制し、pre-push フックは
-  ゲートではなく defence-in-depth)。これが `toolHome` のアセットとして一度だけ
-  焼き込まれたままだと、**同じインストールを共有するすべてのワークスペースが同じ
-  `allowed_push_orgs` を継承してしまう** — org の違いが最も重要になるこのファイルに
-  限って、ワークスペースごとの分離が壊れる。これは(ビルド時に `COPY` するのではなく)
-  **ワークスペースごとの状態として実行時に broker へマウントする**形に変えなければ
-  ならない。`mrw infra-up` が `${workspaceRoot}/.mrw/broker-policy.json` をバインド
-  する。これは任意の改善ではなく必須の変更である。
+- **`broker-policy.json` は権威あるワークスペース単位の状態である。** broker は
+  push 先 org/host の allowlist をプロセス内で強制する(pre-push フックはゲートではなく
+  defence-in-depth)。このファイルはイメージへ焼き込まず、`mrw infra-up` が
+  `MRW_CONFIG_DIR` で選ばれた config ディレクトリを read-only bind するため、同じ
+  ツールインストールを共有するワークスペース同士でも安全に異なる設定を持てる。
 - **`config/purposes/*.json`**(`dev.json`/`task.json`: `default_repos`、
   `mcp_servers`、`dev_kinds`。`open-task` が読む)はディレクトリ*まるごと*の
   config であり、*タスクプロファイル*(タスクがどのリポジトリ + MCP サーバーを
@@ -191,8 +186,8 @@ SDK クエリを1回実行し、次を返す:
 よって**ホスト側で**設定される——ケージ内のコーダーは依然としてそれを選べ
 ない。これは決して権威あるもの(push 先、ポリシー)にまで拡張しては
 ならない——それらは引き続き運用者/`broker-policy` の所有物のままである。
-このステップ自体は `runPlan` と全く同じ形で bounded: `READ_ONLY_TOOLS` +
-`DENY_MUTATION`、`settingSources: []`、構造化出力。編集は一切せず、publish
+このステップ自体は bounded な tool-less leaf である: 全 built-in tool を deny し、
+`settingSources: []`、不活性な cwd、構造化出力を使う。編集は一切せず、publish
 するものを選ぶこともしない。
 
 ## 移行時のハザード(黙って劣化させてはならない)

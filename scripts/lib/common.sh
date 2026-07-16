@@ -11,6 +11,50 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 }
 
+# canonicalize_path <absolute-directory-path>
+# Resolve symlinks in the longest existing prefix while preserving a not-yet-
+# created suffix. This is intentionally portable to macOS's Bash 3.2 (whose
+# realpath lacks GNU -m). Dot-dot in a missing suffix is rejected instead of
+# being normalized across the trusted/untrusted prefix boundary.
+canonicalize_path() {
+  local p="${1:-}" parent suffix="" part physical
+  case "$p" in
+    /*) ;;
+    *) die "path must be absolute (got '$p')" ;;
+  esac
+  while [ "$p" != "/" ] && [ "${p%/}" != "$p" ]; do p="${p%/}"; done
+  [ -n "$p" ] || p="/"
+
+  while [ ! -d "$p" ]; do
+    [ "$p" != "/" ] || die "cannot canonicalize path '$1'"
+    part="$(basename "$p")"
+    case "$part" in
+      ..) die "cannot canonicalize path with '..' in a missing suffix: '$1'" ;;
+      .|'') ;;
+      *) suffix="/$part$suffix" ;;
+    esac
+    parent="$(dirname "$p")"
+    [ "$parent" != "$p" ] || die "cannot canonicalize path '$1'"
+    p="$parent"
+  done
+  physical="$(cd "$p" 2>/dev/null && pwd -P)" \
+    || die "cannot canonicalize path '$1'"
+  if [ "$physical" = "/" ]; then printf '/%s' "${suffix#/}"; else printf '%s' "${physical%/}$suffix"; fi
+}
+
+reject_tasks_path() {
+  case "$1" in
+    */tasks|*/tasks/*) die "refusing config directory under a 'tasks/' path segment ($1)" ;;
+  esac
+}
+
+validate_workspace_config() {
+  local file="$1/workspace.json"
+  [ -f "$file" ] || return 0
+  require_cmd jq
+  jq empty "$file" >/dev/null 2>&1 || die "invalid JSON in $file"
+}
+
 # Workspace root = parent of the scripts/ directory this file lives in.
 workspace_root() {
   local lib_dir
@@ -20,9 +64,11 @@ workspace_root() {
 
 # config_dir / config_mode — resolve the active config directory (holds
 # workspace.json, repos.json, purposes/, broker-policy.json). Resolution
-# priority, matching .githooks/pre-push's own walk-up and cli/mrw.mjs's JS
-# implementation EXACTLY (all three must agree — this is the SECURITY-
-# relevant push-org config the pre-push hook reads):
+# priority, matching cli/mrw.mjs. The pre-push hook reads the setup-baked key
+# with plain `git config --get` so gitdir includeIf rules are evaluated, first
+# rejecting worker-writable local/worktree copies as tampering. It uses the
+# same walk-up only as a compatibility fallback; a broken baked pointer fails
+# closed, while a missing legacy config remains fail-open:
 #   1. $MRW_CONFIG_DIR if set and non-empty.
 #   2. the nearest ancestor .mrw/ directory (one that CONTAINS
 #      workspace.json), found by walking UP from $PWD to /. Never picks
@@ -35,7 +81,8 @@ workspace_root() {
 # (rare, but e.g. sourcing in a test) is always honored.
 _config_resolve() {
   if [ -n "${MRW_CONFIG_DIR:-}" ]; then
-    _CONFIG_DIR_RESULT="$MRW_CONFIG_DIR"
+    _CONFIG_DIR_RESULT="$(canonicalize_path "$MRW_CONFIG_DIR")"
+    reject_tasks_path "$_CONFIG_DIR_RESULT"
   else
     local d="$PWD" _found=""
     while [ "$d" != "/" ]; do
@@ -52,20 +99,21 @@ _config_resolve() {
         */tasks|*/tasks/*) d="$(dirname "$d")"; continue ;;
       esac
       if [ -f "$d/.mrw/workspace.json" ]; then
-        _found="$d/.mrw"
+        _found="$(canonicalize_path "$d/.mrw")"
         break
       fi
       d="$(dirname "$d")"
     done
-    _CONFIG_DIR_RESULT="${_found:-$(workspace_root)/config}"
+    _CONFIG_DIR_RESULT="${_found:-$(canonicalize_path "$(workspace_root)/config")}"
   fi
+  validate_workspace_config "$_CONFIG_DIR_RESULT"
   # Mode is determined by VALUE, not by which priority branch produced it: a
   # caller that explicitly sets MRW_CONFIG_DIR to exactly <toolHome>/config
   # (e.g. `mrw` always forwards its own resolved configDir to every script it
   # spawns — see cli/mrw.mjs's runScript) must still report "legacy" here, so
   # config_mode() AGREES with the mrw.mjs process that set it, whether or not
   # an env override was involved.
-  if [ "$_CONFIG_DIR_RESULT" = "$(workspace_root)/config" ]; then
+  if [ "$_CONFIG_DIR_RESULT" = "$(canonicalize_path "$(workspace_root)/config")" ]; then
     _CONFIG_MODE_RESULT="legacy"
   else
     _CONFIG_MODE_RESULT="workspace"
@@ -91,9 +139,19 @@ config_base() {
   local _CONFIG_DIR_RESULT _CONFIG_MODE_RESULT
   _config_resolve
   if [ "$_CONFIG_MODE_RESULT" = "workspace" ]; then
-    dirname "$_CONFIG_DIR_RESULT"
+    canonicalize_path "$(dirname "$_CONFIG_DIR_RESULT")"
   else
-    workspace_root
+    canonicalize_path "$(workspace_root)"
+  fi
+}
+
+# compose_project_name — keep the historical Compose identity in legacy mode,
+# while isolating containers and named volumes for each per-workspace config.
+compose_project_name() {
+  if [ "$(config_mode)" = "legacy" ]; then
+    printf 'mrw-phase0'
+  else
+    printf 'mrw-%s' "$(printf '%s' "$(config_base)" | shasum -a 256 | cut -c1-12)"
   fi
 }
 
@@ -103,18 +161,18 @@ config_base() {
 # no-.mrw/ case is identical to the historical layout.
 state_root() {
   local sr cdir
-  cdir="$(config_dir)"
-  sr="$(json_get "$cdir/workspace.json" '.state_root' '')"
+  cdir="$(config_dir)" || return $?
+  sr="$(json_get "$cdir/workspace.json" '.state_root' '')" || return $?
   if [ -n "$sr" ]; then
     # Must be absolute: it is interpolated into container bind sources, git
     # worktree targets and sandbox paths, where a relative value would resolve
     # against the caller's cwd and silently misplace state.
     case "$sr" in
-      /*) printf '%s' "$sr" ;;
+      /*) canonicalize_path "$sr" ;;
       *)  die "$cdir/workspace.json .state_root must be an absolute path (got '$sr')" ;;
     esac
   else
-    config_base
+    canonicalize_path "$(config_base)"
   fi
 }
 
@@ -178,6 +236,7 @@ render_template() {
   out="$(sed \
     -e "s|{{WORKSPACE_ROOT}}|$(sed_escape "${WORKSPACE_ROOT:-}")|g" \
     -e "s|{{STATE_ROOT}}|$(sed_escape "${STATE_ROOT:-}")|g" \
+    -e "s|{{CONFIG_DIR}}|$(sed_escape "${CONFIG_DIR:-}")|g" \
     -e "s|{{TASK_DIR}}|$(sed_escape "${TASK_DIR:-}")|g" \
     -e "s|{{TASK_DIR_H}}|$(sed_escape "${TASK_DIR_H:-}")|g" \
     -e "s|{{TICKET_ID}}|$(sed_escape "${TICKET_ID:-}")|g" \
@@ -228,7 +287,10 @@ template_for() {
 json_get() {
   local file="$1" filter="$2" default="${3:-}"
   local out
-  out="$(jq -r "$filter // empty" "$file" 2>/dev/null || true)"
+  require_cmd jq
+  [ -f "$file" ] || { printf '%s' "$default"; return 0; }
+  jq empty "$file" >/dev/null 2>&1 || die "invalid JSON in $file"
+  out="$(jq -r "$filter // empty" "$file")" || die "failed to read JSON from $file"
   if [ -n "$out" ]; then printf '%s' "$out"; else printf '%s' "$default"; fi
 }
 

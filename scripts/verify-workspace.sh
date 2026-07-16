@@ -14,6 +14,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$SCRIPT_DIR/lib/common.sh"
+export COMPOSE_PROJECT_NAME="$(compose_project_name)"
 
 WORKSPACE_ROOT="$(workspace_root)"
 STATE_ROOT="$(state_root)"
@@ -23,6 +24,7 @@ CONFIG_MODE="$(config_mode)"
 info "tool_home  = $WORKSPACE_ROOT"
 info "state_root = $STATE_ROOT"
 info "config_dir = $CONFIG_DIR ($CONFIG_MODE mode)"
+info "compose project = $COMPOSE_PROJECT_NAME"
 if [ "$STATE_ROOT" = "$WORKSPACE_ROOT" ]; then
   log "  (state_root unset in \$(config_dir)/workspace.json — legacy layout)"
 fi
@@ -42,8 +44,10 @@ check() { # <label> <command...>
 if command -v docker >/dev/null 2>&1; then
   check "docker compose config parses" \
     bash -c "cd '$WORKSPACE_ROOT' && docker compose -f .devcontainer/docker-compose.yml config -q"
+  check "mrw-telemetry network is internal" \
+    bash -c "[ \"\$(docker network inspect -f '{{.Internal}}' mrw-telemetry 2>/dev/null)\" = true ]"
 else
-  warn "docker not found — skipping 'docker compose config' check"
+  warn "docker not found — skipping docker compose and telemetry-network checks"
 fi
 
 # --- 2. render_template TASK_DIR_H spot check -------------------------------

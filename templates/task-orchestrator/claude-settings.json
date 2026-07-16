@@ -28,6 +28,7 @@
       "Edit(/{{WORKSPACE_ROOT}}/scripts/**)",
       "Edit(/{{WORKSPACE_ROOT}}/templates/**)",
       "Edit(/{{WORKSPACE_ROOT}}/config/**)",
+      "Edit(/{{CONFIG_DIR}}/**)",
       "Edit(/{{WORKSPACE_ROOT}}/.claude/**)",
       "Edit(~/.claude.json)",
       "WebFetch",
@@ -64,6 +65,7 @@
         "{{WORKSPACE_ROOT}}/.githooks",
         "{{WORKSPACE_ROOT}}/.claude",
         "{{WORKSPACE_ROOT}}/config",
+        "{{CONFIG_DIR}}",
         "{{WORKSPACE_ROOT}}/scripts",
         "{{WORKSPACE_ROOT}}/templates",
         "~/.claude.json"

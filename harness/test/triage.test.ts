@@ -6,9 +6,17 @@
  * (node:test).
  */
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import { TriageSchema, WORK_TYPES } from "../src/types.js";
-import { filterToAvailableRepos } from "../src/triage.js";
+import {
+  filterToAvailableRepos,
+  createTriageCwd,
+  TRIAGE_DENY_ALL_BUILTINS,
+  TRIAGE_TOOLS,
+} from "../src/triage.js";
 
 const VALID = {
   work_type: "bugfix",
@@ -87,4 +95,19 @@ test("filterToAvailableRepos returns empty for an empty available set", () => {
 
 test("filterToAvailableRepos returns empty for empty claimed repos", () => {
   assert.deepEqual(filterToAvailableRepos([], ["a", "b"]), []);
+});
+
+test("triage host-side posture is tool-less and uses an inert cwd", () => {
+  assert.deepEqual(TRIAGE_TOOLS, []);
+  const cwd = createTriageCwd();
+  try {
+    assert.equal(fs.realpathSync(path.dirname(cwd)), fs.realpathSync(os.tmpdir()));
+    assert.deepEqual(fs.readdirSync(cwd), []);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+  assert.deepEqual(
+    new Set(TRIAGE_DENY_ALL_BUILTINS),
+    new Set(["Edit", "Write", "Bash", "NotebookEdit", "WebFetch", "WebSearch", "Read", "Grep", "Glob"]),
+  );
 });

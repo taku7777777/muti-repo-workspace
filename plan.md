@@ -111,9 +111,9 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
     既知の残 UX: chat-home volume 初回のみ CLI onboarding（テーマ/ログイン）
     の人間クリックスルーが必要。
   - C4: 不変条件チェック + 独立レビュー + ライブ E2E
-- **feat/mrw pre-merge blockers（2026-07-16 独立レビュー）** — push-guard config の
-  canonicalize / triage leaf の姿勢修正 / telemetry 網 internal 検証。Thread C とは
-  独立のワークストリーム（マージ前に要修正）。
+- **feat/mrw pre-merge blockers（2026-07-16 独立レビュー）** — ✅ 修正済み
+  （2026-07-17、作業ツリー、コミット前）。push-guard config の canonicalize /
+  triage leaf の tool-less 化 / telemetry 網 internal 検証を完了。
 - ~~**Thread B（ブラウザ承認 / `mrw serve`）**~~ — ✅ 完了（上の表参照）。残フォローアップ:
   稼働中 broker コンテナは旧イメージのため、次回 `mrw infra-up --build` 後に
   コンテナ内 broker での承認ライブ E2E を 1 回実施（ホスト側シムでは検証済み）。
@@ -143,8 +143,8 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
 
 ### triage leaf（Phase 2.4）
 - `harness/src/triage.ts` `runTriage(text, repos) → {work_type,title,repos,summary}`。
-  `runPlan` と同一の read-only posture（`READ_ONLY_TOOLS`+`DENY_MUTATION`+
-  `settingSources:[]`、repo cwd なし、text のみで分類）。
+  tool-less posture（全 built-in tool deny + `settingSources:[]`、不活性 cwd、
+  text のみで分類）。
 - `work_type` は検証済み enum、`repos` はコードで availableRepos との積集合に絞る。
 - `mrw task-up --from <link>`（ticket-source で取得）→ triage → title/repos 自動補完。
   **graceful degradation**: triage 失敗（auth/gh/API）でもタスク作成は止めない。

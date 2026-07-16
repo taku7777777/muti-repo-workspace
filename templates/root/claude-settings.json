@@ -71,6 +71,7 @@
       "Read(~/.config/gcloud/**)",
       "Read(~/.npmrc)",
       "Edit(/repositories/**)",
+      "Edit(/{{STATE_ROOT}}/repositories/**)",
       "Edit(/.claude/**)",
       "Edit(~/.claude.json)"
     ],

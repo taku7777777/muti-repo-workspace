@@ -67,6 +67,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$SCRIPT_DIR/lib/common.sh"
+export COMPOSE_PROJECT_NAME="$(compose_project_name)"
 
 FAIL=0
 pass() { printf 'PASS: %s\n' "$1"; }

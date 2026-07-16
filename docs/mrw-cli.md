@@ -1,6 +1,6 @@
 # `mrw` CLI — decoupling the tool from its state (design memo)
 
-**Status: DESIGN PROPOSAL (not built).** Companion to
+**Status: Phase 1–2 implemented (see `plan.md`); this memo is the original design record.** Companion to
 [architecture.md](architecture.md) (the security layers) and
 [agent-orchestration.md](agent-orchestration.md) (the container control plane).
 This memo settles how `muti-repo-workspace` stops *being* the workspace and
@@ -92,16 +92,11 @@ Tool assets (`harness/`, `scripts/`, `docker/`, `.devcontainer/`, `templates/`,
 path** (`toolHome`), never from the workspace. State and tool are now two
 independent sources — but see three complications the naive split hides:
 
-- **`config/broker-policy.json` is baked into the broker image at build time**
-  (`broker.Dockerfile`: `COPY config/broker-policy.json …`) and is the
-  *authoritative* push-org/host enforcement point (the broker enforces it
-  in-process; the pre-push hook is defence-in-depth, not the gate). If it stays
-  a `toolHome` asset baked once, **every workspace sharing that install inherits
-  the same `allowed_push_orgs`** — which breaks per-workspace isolation for the
-  one file where org divergence matters most. It must become **per-workspace
-  state, mounted into the broker at runtime** (not `COPY`d at build), so
-  `mrw infra-up` binds `${workspaceRoot}/.mrw/broker-policy.json`. This is a
-  required change, not optional.
+- **`broker-policy.json` is authoritative per-workspace state.** The broker
+  enforces its push-org/host allowlist in-process (the pre-push hook is
+  defence-in-depth, not the gate). It is not baked into the image: `mrw
+  infra-up` read-only binds the active config directory selected by
+  `MRW_CONFIG_DIR`, so workspaces sharing one tool install can safely diverge.
 - **`config/purposes/*.json`** (`dev.json`/`task.json`: `default_repos`,
   `mcp_servers`, `dev_kinds`, read by `open-task`) is a whole config *directory*
   — a *task profile* (which repos + MCP servers a task opens), whose name also
@@ -183,9 +178,9 @@ telemetry *label*, fail-open, and "fake data" is already an accepted risk of the
 attribute syntax; and (c) it is set **host-side, outside the cage, by the
 operator-run `task-up`** — the caged coder still cannot choose it. It must never
 be extended to anything authoritative (push targets, policy) — those stay
-operator/`broker-policy` owned. The step itself is bounded exactly like
-`runPlan`: `READ_ONLY_TOOLS` + `DENY_MUTATION`, `settingSources: []`, structured
-output. It never edits and never chooses what to publish.
+operator/`broker-policy` owned. The step itself is a bounded, tool-less leaf:
+all built-in tools are denied, `settingSources: []`, it runs from an inert cwd,
+and returns structured output. It never edits and never chooses what to publish.
 
 ## Migration hazards (must not silently regress)
 

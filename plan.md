@@ -21,7 +21,7 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
 
 ## 1. 元々の計画（設計メモ = docs/mrw-cli.md）
 
-独立した 2 スレッドに分解した。
+独立したスレッドに分解した（当初は A/B の 2 本、のち C を追加）。
 
 ### Thread A — 状態をツールの外へ（CLI 化）
 - ツール（skills / harness / broker / reviewer / compose / templates）と
@@ -37,10 +37,33 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
 - 配信は **token を持たない別プロセス `mrw serve`** が担い、broker が SHA を再検証。
   localhost バインド + トークン/CSRF 必須。
 
+### Thread C — 対話 UX（chat surface の Claude Code 化）
+> 設計の正典: [docs/mrw-chat.md](docs/mrw-chat.md)（+ [.ja.md](docs/mrw-chat.ja.md)）
+- M2 チャット面（素の readline REPL）を **Claude Code そのもの**に置換。
+  spine エンジンを stdio MCP デーモン（`harness/src/spined/`）に切り出し、
+  Claude Code は typed な `mcp__spine__*` を propose するだけ（dispose は
+  coded spine のまま）。UI/エンジンの縫い目 = MCP ツール契約。
+- Claude Code は「素のまま」ではなく生成固定構成の下で:
+  deny 姿勢 settings（非バイパス）+ persona CLAUDE.md + `.mcp.json` +
+  イメージにバージョン固定した CLI。既存 orchestrator コンテナの檻の中。
+- ゲート: チャット内 y/N は spined 経路のみ注入式 approval policy で外し
+  **broker SHA に一本化**（旧 REPL は y/N 維持）。`diffTouchesTests` caveat は
+  **broker が ground-truth diff から自ら算出**して SHA ゲートに表示
+  （加算 ~20 行のみ。権威・ポリシーは不変。intent 本文行案は
+  埋没・公開 PR 漏れのため独立レビュー指摘で却下）。
+- 非対話 LLM leaves（triage/plan/review/worker）は SDK のまま不変。
+  旧 REPL は headless/フォールバック経路として温存。
+- フォールバック（B-lite = Ink で主要ギャップのみの小 TUI）を C1 スパイク
+  不成立時の撤退線として保持。
+
 ### 合意済みの設計判断
 - `purposes/` は toolHome 既定のまま（当面は上書きなし）。
 - named volume（spine-notes / review-diffs）は既定保持、`mrw close --purge` で破棄。
 - 承認サーバは broker 同居ではなく別 `mrw serve`。
+- 対話 UI は Claude Code を採用（Thread C、2026-07-16 合意）。承認の権威は
+  broker SHA のみ（チャット内 y/N は spined 経路から廃止、REPL は維持）。
+  UI 改善はエンジンロジック改善と独立に進められること（境界 = MCP 契約）。
+  設計メモは独立レビュー（SHIP-WITH-FIXES、16 件）を全件反映済み。
 
 ## 2. 現在の実行状況
 
@@ -58,6 +81,20 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
 `bc0c69e`/`034a4a6` = DEMO-6/7 記録 も同ブランチに含む）
 
 ### ⏳ 残タスク
+- **Thread C（対話 UX / Claude Code フロントエンド）** — 設計合意済み（docs/mrw-chat.md）。
+  - C1: ✅ スパイク完了（2026-07-16、claude v2.1.211 実測）→ **GO**。
+    (a) MCP progress notification の message が TUI にライブ描画
+    （`⎿ step N/45s elapsed (7%)` + スピナー/経過/トークン/esc to interrupt）;
+    (b) deny 姿勢は built-in ツールをセッションから**消す**形で有効
+    （allow はディレクトリ trust が前提。trust ダイアログが事前許可ツールを列挙）;
+    (c)(d)(e) claudeMdExcludes / elicitation / statusLine はバイナリに実在確認
+    （挙動検証は C3 selfcheck に委譲）。
+  - C2: `spined` デーモン（既存 executor/ledger の MCP アダプタ + tests）
+  - C3: フロントエンド構成生成 + `mrw chat`/task-up/cmux 配線 + CLI バージョン固定
+  - C4: 不変条件チェック + 独立レビュー + ライブ E2E
+- **feat/mrw pre-merge blockers（2026-07-16 独立レビュー）** — push-guard config の
+  canonicalize / triage leaf の姿勢修正 / telemetry 網 internal 検証。Thread C とは
+  独立のワークストリーム（マージ前に要修正）。
 - **Thread B（ブラウザ承認 / `mrw serve`）** — 未着手。
 - **work_type → telemetry の per-ticket 配線** — 現状 stack 共有のため `MRW_WORK_TYPE`
   は stack 単位。per-ticket 帰属は別途要設計（telemetry の per-ticket 分離議論に接続）。

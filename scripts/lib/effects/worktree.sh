@@ -12,12 +12,12 @@
 # repositories/<repo> on <branch>. Sparse checkout for knowledge repos.
 create_worktree() {
   local repo="$1" ticket="$2" branch="$3" purpose="$4"
-  local sroot troot origin target_rel target_abs repo_type
+  local sroot origin target_rel target_abs repo_type
   # repositories/ (origin) and tasks/ (target) live under state_root; keeping
   # them siblings there preserves the RELATIVE target below (`../../tasks/...`
-  # resolves within state_root). config/ stays under the tool checkout.
+  # resolves within state_root). config lives under config_dir (tool_home
+  # config/ by default, or a per-workspace .mrw/).
   sroot="$(state_root)"
-  troot="$(workspace_root)"
   origin="$sroot/repositories/$repo"
   target_rel="../../tasks/$ticket/repositories/$repo"
   target_abs="$sroot/tasks/$ticket/repositories/$repo"
@@ -49,7 +49,7 @@ create_worktree() {
     local paths
     paths="$(jq -r --arg n "$repo" --arg p "$purpose" \
       '.repositories[] | select(.name == $n) | .sparse_paths[$p] // [] | join(" ")' \
-      "$troot/config/repos.json")"
+      "$(config_dir)/repos.json")"
     if [ -n "$paths" ]; then
       info "  - $repo: sparse checkout ($paths)"
       # shellcheck disable=SC2086

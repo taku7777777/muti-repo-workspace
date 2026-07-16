@@ -35,7 +35,8 @@ require_cmd jq
 
 WORKSPACE_ROOT="$(workspace_root)"
 STATE_ROOT="$(state_root)"
-WS_CONFIG="$WORKSPACE_ROOT/config/workspace.json"
+CONFIG_DIR="$(config_dir)"
+WS_CONFIG="$CONFIG_DIR/workspace.json"
 
 TICKET_ID=""
 PURPOSE=""
@@ -74,7 +75,7 @@ META="$TASK_DIR/.workspace-meta.json"
 BRANCH_PREFIX="$(json_get "$WS_CONFIG" '.branch_prefix' 'feat/')"
 BRANCH="${BRANCH_PREFIX}${TICKET_ID}"
 TASK_DIR_H="$(to_home_path "$TASK_DIR")"
-export WORKSPACE_ROOT STATE_ROOT TASK_DIR TASK_DIR_H TICKET_ID BRANCH TITLE TICKET_URL
+export WORKSPACE_ROOT STATE_ROOT CONFIG_DIR TASK_DIR TASK_DIR_H TICKET_ID BRANCH TITLE TICKET_URL
 
 # ---------------------------------------------------------------------------
 phase_init() {
@@ -84,7 +85,7 @@ phase_init() {
   fi
   list_purposes | grep -qx "$PURPOSE" \
     || die "unknown purpose '$PURPOSE' (available: $(list_purposes | tr '\n' ' '))"
-  PURPOSE_JSON="$WORKSPACE_ROOT/config/purposes/$PURPOSE.json"
+  PURPOSE_JSON="$CONFIG_DIR/purposes/$PURPOSE.json"
 
   # dev_kind
   if [ -n "$DEV_KIND" ]; then
@@ -142,7 +143,7 @@ load_meta() {
   # --no-sandbox tasks back to sandboxed.
   SANDBOX="$(jq -r 'if .sandbox == false then "false" else "true" end' "$META")"
   REPOS="$(jq -r '.repos | join(" ")' "$META")"
-  PURPOSE_JSON="$WORKSPACE_ROOT/config/purposes/$PURPOSE.json"
+  PURPOSE_JSON="$CONFIG_DIR/purposes/$PURPOSE.json"
   export PURPOSE TITLE TICKET_URL
 }
 

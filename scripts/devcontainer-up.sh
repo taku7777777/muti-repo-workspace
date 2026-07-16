@@ -43,6 +43,17 @@ if [ "$_state_root" != "$(workspace_root)" ]; then
   mkdir -p "$_state_root/tasks" "$_state_root/repositories"
 fi
 
+# Point the compose broker-policy bind at the active config_dir (workspace.json
+# / repos.json / purposes/ / broker-policy.json). Unset ⇒ compose falls back
+# to `../config` (the tool checkout) = legacy, byte-identical to Phase 1.
+_config_dir="$(config_dir)"
+if [ "$_config_dir" != "$(workspace_root)/config" ]; then
+  case "$_config_dir" in
+    /*) export MRW_CONFIG_DIR="$_config_dir" ;;
+    *)  die "config_dir ('$_config_dir') must be an absolute path to be used as a container bind source (got a relative MRW_CONFIG_DIR?)" ;;
+  esac
+fi
+
 # Idempotent: the `telemetry` network is `external: true` in the compose
 # file (shared with the sibling claude-code-monitoring stack), so compose up
 # fails outright if it doesn't exist yet — create it here, internal-only,

@@ -17,11 +17,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 WORKSPACE_ROOT="$(workspace_root)"
 STATE_ROOT="$(state_root)"
+CONFIG_DIR="$(config_dir)"
+CONFIG_MODE="$(config_mode)"
 
 info "tool_home  = $WORKSPACE_ROOT"
 info "state_root = $STATE_ROOT"
+info "config_dir = $CONFIG_DIR ($CONFIG_MODE mode)"
 if [ "$STATE_ROOT" = "$WORKSPACE_ROOT" ]; then
-  log "  (state_root unset in config/workspace.json — legacy layout)"
+  log "  (state_root unset in \$(config_dir)/workspace.json — legacy layout)"
 fi
 
 pass=true

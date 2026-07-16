@@ -18,22 +18,103 @@ workspace_root() {
   dirname "$(dirname "$lib_dir")"
 }
 
+# config_dir / config_mode — resolve the active config directory (holds
+# workspace.json, repos.json, purposes/, broker-policy.json). Resolution
+# priority, matching .githooks/pre-push's own walk-up and cli/mrw.mjs's JS
+# implementation EXACTLY (all three must agree — this is the SECURITY-
+# relevant push-org config the pre-push hook reads):
+#   1. $MRW_CONFIG_DIR if set and non-empty.
+#   2. the nearest ancestor .mrw/ directory (one that CONTAINS
+#      workspace.json), found by walking UP from $PWD to /. Never picks
+#      $HOME/.mrw or any other .mrw accidentally unless it really contains
+#      workspace.json.
+#   3. <toolHome>/config (legacy / single-workspace default).
+# "workspace mode" = resolved via (1) or (2); "legacy mode" = resolved via
+# (3). config_dir()/config_mode() are cheap (a single directory walk) — call
+# them directly rather than caching, so a cwd change within the same shell
+# (rare, but e.g. sourcing in a test) is always honored.
+_config_resolve() {
+  if [ -n "${MRW_CONFIG_DIR:-}" ]; then
+    _CONFIG_DIR_RESULT="$MRW_CONFIG_DIR"
+  else
+    local d="$PWD" _found=""
+    while [ "$d" != "/" ]; do
+      # SECURITY: never accept a .mrw/ inside worker-writable state
+      # (state_root/tasks/**). A prompt-injected worker can COMMIT a
+      # .mrw/workspace.json into its own worktree (which passes
+      # push-create-pr.sh's porcelain check) to spoof the push-org/host
+      # allowlist the pre-push hook reads. The legitimate per-workspace .mrw/
+      # sits at the workspace root — a SIBLING of tasks/, with no `tasks` path
+      # component — so skip any candidate under a tasks/ segment and keep
+      # walking up to it. (Caveat: a workspace dir must not itself be named
+      # `tasks` or live under a `tasks/` component.)
+      case "$d" in
+        */tasks|*/tasks/*) d="$(dirname "$d")"; continue ;;
+      esac
+      if [ -f "$d/.mrw/workspace.json" ]; then
+        _found="$d/.mrw"
+        break
+      fi
+      d="$(dirname "$d")"
+    done
+    _CONFIG_DIR_RESULT="${_found:-$(workspace_root)/config}"
+  fi
+  # Mode is determined by VALUE, not by which priority branch produced it: a
+  # caller that explicitly sets MRW_CONFIG_DIR to exactly <toolHome>/config
+  # (e.g. `mrw` always forwards its own resolved configDir to every script it
+  # spawns — see cli/mrw.mjs's runScript) must still report "legacy" here, so
+  # config_mode() AGREES with the mrw.mjs process that set it, whether or not
+  # an env override was involved.
+  if [ "$_CONFIG_DIR_RESULT" = "$(workspace_root)/config" ]; then
+    _CONFIG_MODE_RESULT="legacy"
+  else
+    _CONFIG_MODE_RESULT="workspace"
+  fi
+}
+
+config_dir() {
+  local _CONFIG_DIR_RESULT _CONFIG_MODE_RESULT
+  _config_resolve
+  printf '%s' "$_CONFIG_DIR_RESULT"
+}
+
+config_mode() {
+  local _CONFIG_DIR_RESULT _CONFIG_MODE_RESULT
+  _config_resolve
+  printf '%s' "$_CONFIG_MODE_RESULT"
+}
+
+# config_base — the workspace base directory: workspace mode ⇒ dirname of the
+# .mrw/ config_dir (the directory that HOLDS .mrw/); legacy mode ⇒
+# workspace_root() (toolHome). This is state_root()'s default.
+config_base() {
+  local _CONFIG_DIR_RESULT _CONFIG_MODE_RESULT
+  _config_resolve
+  if [ "$_CONFIG_MODE_RESULT" = "workspace" ]; then
+    dirname "$_CONFIG_DIR_RESULT"
+  else
+    workspace_root
+  fi
+}
+
 # state_root — where repositories/ and tasks/ live. Configurable via
-# config/workspace.json `.state_root`; defaults to the tool checkout so the
-# unconfigured case is identical to the historical layout.
+# `.state_root` in $(config_dir)/workspace.json; defaults to config_base()
+# (== workspace_root() / toolHome in legacy mode) so the unconfigured,
+# no-.mrw/ case is identical to the historical layout.
 state_root() {
-  local sr
-  sr="$(json_get "$(workspace_root)/config/workspace.json" '.state_root' '')"
+  local sr cdir
+  cdir="$(config_dir)"
+  sr="$(json_get "$cdir/workspace.json" '.state_root' '')"
   if [ -n "$sr" ]; then
     # Must be absolute: it is interpolated into container bind sources, git
     # worktree targets and sandbox paths, where a relative value would resolve
     # against the caller's cwd and silently misplace state.
     case "$sr" in
       /*) printf '%s' "$sr" ;;
-      *)  die "config/workspace.json .state_root must be an absolute path (got '$sr')" ;;
+      *)  die "$cdir/workspace.json .state_root must be an absolute path (got '$sr')" ;;
     esac
   else
-    workspace_root
+    config_base
   fi
 }
 
@@ -70,7 +151,7 @@ validate_ticket_id() {
     *..*)    die "invalid ticket id '$id': must not contain '..'" ;;
     *"$nl"*) die "invalid ticket id '$id': must not contain newlines" ;;
   esac
-  pattern="$(json_get "$(workspace_root)/config/workspace.json" '.ticket_id_pattern' '^[A-Z]+-[A-Za-z0-9_-]+$')"
+  pattern="$(json_get "$(config_dir)/workspace.json" '.ticket_id_pattern' '^[A-Z]+-[A-Za-z0-9_-]+$')"
   printf '%s' "$id" | grep -qE "$pattern" \
     || die "ticket id '$id' does not match $pattern (the prefix is required and never auto-added)"
 }
@@ -131,18 +212,18 @@ json_get() {
   if [ -n "$out" ]; then printf '%s' "$out"; else printf '%s' "$default"; fi
 }
 
-# list_purposes — names of available purposes (config/purposes/*.json).
+# list_purposes — names of available purposes ($(config_dir)/purposes/*.json).
 list_purposes() {
-  local root
-  root="$(workspace_root)"
-  ls "$root/config/purposes/" 2>/dev/null | sed -n 's/\.json$//p'
+  local cdir
+  cdir="$(config_dir)"
+  ls "$cdir/purposes/" 2>/dev/null | sed -n 's/\.json$//p'
 }
 
-# repo_field <repo-name> <field> — look up a field in config/repos.json.
+# repo_field <repo-name> <field> — look up a field in $(config_dir)/repos.json.
 repo_field() {
-  local root
-  root="$(workspace_root)"
+  local cdir
+  cdir="$(config_dir)"
   jq -r --arg n "$1" --arg f "$2" \
     '.repositories[] | select(.name == $n) | .[$f] // empty' \
-    "$root/config/repos.json"
+    "$cdir/repos.json"
 }

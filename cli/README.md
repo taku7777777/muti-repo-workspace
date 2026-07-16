@@ -7,9 +7,49 @@ propagating its exit code. Skills (`/setup-workspace`, `/open-task`, …) and
 the raw scripts keep working unchanged — `mrw` is an additional entry point,
 not a replacement.
 
-See `docs/mrw-cli.md` for the longer-term design (a `.mrw/config.json`
-workspace model, link-based ticket triage, native-path parity). None of that
-is implemented here — this slice only wires up the dispatcher.
+See `docs/mrw-cli.md` for the longer-term design (link-based ticket triage,
+native-path parity). Relocatable per-workspace config now IS implemented (see
+"Per-workspace config (`.mrw/`)" below) — it keeps the same filenames as
+`config/` (`workspace.json`, `repos.json`, `purposes/`, `broker-policy.json`)
+rather than consolidating into a single `config.json`.
+
+## Per-workspace config (`.mrw/`)
+
+Config (`workspace.json`, `repos.json`, `purposes/`, `broker-policy.json`) can
+live in a per-workspace `.mrw/` directory instead of only
+`<toolHome>/config` — so multiple independent workspaces (different repo
+sets AND different `allowed_push_orgs`) can coexist from the same tool
+checkout.
+
+`config_dir` (the directory holding those files) resolves, in priority:
+
+1. `$MRW_CONFIG_DIR` if set and non-empty.
+2. the nearest ancestor `.mrw/` directory (one that **contains**
+   `workspace.json`), found by walking up from the current directory to `/`.
+3. `<toolHome>/config` (the legacy, single-workspace default).
+
+Resolution via (1) or (2) is **workspace mode**; via (3) is **legacy mode**.
+`mrw`, every host script (via `scripts/lib/common.sh`'s `config_dir()`), and
+`.githooks/pre-push` all implement this identically, so a `.mrw/` discovered
+by one is discovered the same way by the others. **With no `.mrw/` above the
+current directory and `MRW_CONFIG_DIR` unset, this is byte-identical to the
+pre-`.mrw/` behavior** (`config_dir == <toolHome>/config`).
+
+`state_root`'s default also changes shape slightly: it now defaults to the
+**workspace base** (in workspace mode, the directory that holds `.mrw/`; in
+legacy mode, `toolHome` — unchanged) rather than always `toolHome`. An
+explicit absolute `.state_root` in `workspace.json` still wins either way.
+
+Use `mrw init [dir]` to scaffold a new per-workspace `.mrw/` (see below), then
+edit its `repos.json` / `workspace.json` (`allowed_push_orgs` etc.) and
+`broker-policy.json` for that workspace.
+
+**Security note:** `allowed_push_orgs` and `broker-policy.json` are now
+per-workspace — each `.mrw/` has its own push-org allowlist, enforced by
+`.githooks/pre-push` (native path, defence-in-depth) and, authoritatively for
+the container path, by the publish broker reading its per-workspace
+`broker-policy.json` (bind-mounted from `config_dir`, see
+`.devcontainer/docker-compose.yml`'s `${MRW_CONFIG_DIR:-../config}`).
 
 ## Install
 
@@ -32,9 +72,10 @@ works the same from any cwd.
 | Subcommand | Action |
 |---|---|
 | `mrw help` / `-h` / `--help` / no args | print usage |
-| `mrw config` | print resolved `toolHome`, `state_root`, and repo names from `config/repos.json` |
-| `mrw config --state-root <abs>` | set `.state_root` in `config/workspace.json` (absolute path required) |
-| `mrw config --state-root ""` | clear `.state_root` back to the legacy default (== `toolHome`) |
+| `mrw config` | print resolved `toolHome`, `config_dir` (+ workspace/legacy mode), `state_root`, and repo names from `config_dir/repos.json` |
+| `mrw config --state-root <abs>` | set `.state_root` in `config_dir/workspace.json` (absolute path required) |
+| `mrw config --state-root ""` | clear `.state_root` back to the default (workspace base — `toolHome` in legacy mode) |
+| `mrw init [dir]` | scaffold a new per-workspace `.mrw/` in `[dir]` (default cwd): copies `workspace.json`, `repos.json`, `purposes/`, `broker-policy.json` from `<toolHome>/config` as a starting point. Refuses if `<dir>/.mrw/` already exists. Prints next steps (edit `repos.json`/`allowed_push_orgs`, then `mrw setup`). |
 | `mrw setup [args...]` | exec `scripts/setup-workspace.sh` (e.g. `--skip-clone`, `--dry-run`) |
 | `mrw infra-up [args...]` | exec `scripts/devcontainer-up.sh` (args forwarded to `docker compose up`) |
 | `mrw infra-down [args...]` | `docker compose -f .devcontainer/docker-compose.yml down` from `toolHome` |
@@ -84,16 +125,16 @@ repo checkout and can only Read/Grep/Glob, never Edit/Write/Bash).
 
 ## `mrw config --state-root`
 
-`config/workspace.json`'s `.state_root` is edited in place: only the
-`"state_root"` line's value is changed, so every other key (including the
+The active `config_dir`'s `workspace.json` (`<toolHome>/config/workspace.json`
+in legacy mode, `<workspace-base>/.mrw/workspace.json` in workspace mode —
+see "Per-workspace config" above) has its `.state_root` edited in place: only
+the `"state_root"` line's value is changed, so every other key (including the
 `_note` fields), the 2-space indentation, blank lines, and the trailing
 newline are preserved untouched. Setting a value and then clearing it back to
 `""` leaves the file byte-identical to before.
 
 ## Deferred (later slices)
 
-- Moving config into a per-workspace `.mrw/config.json` (git-style discovery,
-  multiple independent workspaces).
 - Native-path parity / non-macOS support (the Keychain credential fallback for
   triage is macOS-only, same as `devcontainer-up.sh`).
 - **`work_type` → telemetry wiring is per-run, not per-ticket.**

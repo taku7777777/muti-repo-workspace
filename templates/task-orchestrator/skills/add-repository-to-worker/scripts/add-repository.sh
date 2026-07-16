@@ -45,7 +45,7 @@ elif [ -f "$WORKER_SETTINGS" ]; then
   [ -n "$PURPOSE" ] || PURPOSE="unknown"
 fi
 
-BRANCH_PREFIX="$(json_get "$TOOL_HOME/config/workspace.json" '.branch_prefix' 'feat/')"
+BRANCH_PREFIX="$(json_get "$(config_dir)/workspace.json" '.branch_prefix' 'feat/')"
 BRANCH="${BRANCH_PREFIX}${TICKET_ID}"
 
 [ -n "$(repo_field "$REPO" name)" ] || die "'$REPO' is not defined in config/repos.json"

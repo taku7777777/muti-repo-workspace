@@ -24,6 +24,8 @@ WORKSPACE_ROOT="$(workspace_root)"
 export WORKSPACE_ROOT
 STATE_ROOT="$(state_root)"
 export STATE_ROOT
+CONFIG_DIR="$(config_dir)"
+export CONFIG_DIR
 
 SKIP_CLONE=false
 DRY_RUN=false
@@ -45,10 +47,10 @@ require_cmd jq
 command -v gh >/dev/null 2>&1 || warn "gh (GitHub CLI) not found — PR creation will not work until installed."
 command -v cmux >/dev/null 2>&1 || warn "cmux not found — /open-task will fall back to clipboard mode (no 3-tab orchestration)."
 
-REPOS_JSON="$WORKSPACE_ROOT/config/repos.json"
-[ -f "$REPOS_JSON" ] || die "config/repos.json not found"
+REPOS_JSON="$CONFIG_DIR/repos.json"
+[ -f "$REPOS_JSON" ] || die "$REPOS_JSON not found"
 jq -e '.repositories | type == "array"' "$REPOS_JSON" >/dev/null \
-  || die "config/repos.json: .repositories must be an array"
+  || die "$REPOS_JSON: .repositories must be an array"
 
 # ---------------------------------------------------------------- 1. clones
 if ! $SKIP_CLONE; then
@@ -66,7 +68,7 @@ if ! $SKIP_CLONE; then
       log "  - $name: already cloned, skipping"
     else
       case "$url" in
-        *your-org*) warn "  - $name: url still points at the placeholder org ($url) — edit config/repos.json. Skipping."; continue ;;
+        *your-org*) warn "  - $name: url still points at the placeholder org ($url) — edit $REPOS_JSON. Skipping."; continue ;;
       esac
       info "  - cloning $name ($url)"
       run git clone "$url" "$dest"
@@ -112,9 +114,9 @@ for _scope in "$WORKSPACE_ROOT" "$STATE_ROOT"; do
   fi
 done
 
-ALLOWED_ORGS="$(json_get "$WORKSPACE_ROOT/config/workspace.json" '.allowed_push_orgs | join(", ")')"
+ALLOWED_ORGS="$(json_get "$CONFIG_DIR/workspace.json" '.allowed_push_orgs | join(", ")')"
 if [ -z "$ALLOWED_ORGS" ]; then
-  warn "allowed_push_orgs is empty in config/workspace.json — pushes are unrestricted (the hook only warns). NOTE: the hook applies to this workspace repo itself too; add your own org before restricting."
+  warn "allowed_push_orgs is empty in $CONFIG_DIR/workspace.json — pushes are unrestricted (the hook only warns). NOTE: the hook applies to this workspace repo itself too; add your own org before restricting."
 else
   log "  push destinations restricted to: $ALLOWED_ORGS"
 fi

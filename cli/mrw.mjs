@@ -21,8 +21,53 @@ const toolHome = path.resolve(
   ".."
 );
 
-const WORKSPACE_CONFIG_PATH = path.join(toolHome, "config", "workspace.json");
-const REPOS_CONFIG_PATH = path.join(toolHome, "config", "repos.json");
+// ---------------------------------------------------------------------------
+// config_dir resolution — MUST agree with scripts/lib/common.sh's
+// config_dir()/config_mode() and .githooks/pre-push's own walk-up (see
+// common.sh's doc comment on config_dir — this is the SECURITY-relevant
+// push-org config the pre-push hook reads). Priority:
+//   1. $MRW_CONFIG_DIR if set and non-empty.
+//   2. the nearest ancestor .mrw/ directory (one that CONTAINS
+//      workspace.json), found by walking UP from process.cwd() to "/".
+//   3. <toolHome>/config (legacy / single-workspace default).
+// "workspace mode" = resolved via (1) or (2); "legacy mode" = resolved via (3).
+// A path segment named exactly "tasks" marks worker-writable state
+// (state_root/tasks/**). We never resolve config from there — see the SECURITY
+// note in scripts/lib/common.sh's _config_resolve. Must match the shell +
+// pre-push walk-ups exactly.
+function underTasksSegment(dir) {
+  return dir.split(path.sep).includes("tasks");
+}
+
+function findAncestorConfigDir() {
+  let d = process.cwd();
+  while (d !== "/") {
+    if (!underTasksSegment(d) && fs.existsSync(path.join(d, ".mrw", "workspace.json"))) {
+      return path.join(d, ".mrw");
+    }
+    d = path.dirname(d);
+  }
+  return null;
+}
+
+function resolveConfigDir() {
+  const legacyDir = path.join(toolHome, "config");
+  const dir = process.env.MRW_CONFIG_DIR || findAncestorConfigDir() || legacyDir;
+  // Mode is determined by VALUE, not by which priority branch produced it —
+  // mirrors scripts/lib/common.sh's _config_resolve(). This matters because
+  // runScript() below always forwards MRW_CONFIG_DIR=configDir to every
+  // spawned script, including in the legacy case (configDir === legacyDir);
+  // the child's own config_mode() must still report "legacy" then, so it
+  // AGREES with this process rather than seeing "env var is set" and
+  // concluding "workspace".
+  const mode = dir === legacyDir ? "legacy" : "workspace";
+  return { dir, mode };
+}
+
+const { dir: configDir, mode: configMode } = resolveConfigDir();
+
+const WORKSPACE_CONFIG_PATH = path.join(configDir, "workspace.json");
+const REPOS_CONFIG_PATH = path.join(configDir, "repos.json");
 
 // ---------------------------------------------------------------------------
 // small helpers
@@ -31,23 +76,31 @@ function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
 
+// resolveConfigBase — mirrors scripts/lib/common.sh `config_base()`:
+// workspace mode ⇒ dirname(configDir) (the dir that HOLDS .mrw/); legacy
+// mode ⇒ toolHome.
+function resolveConfigBase() {
+  return configMode === "workspace" ? path.dirname(configDir) : toolHome;
+}
+
 // resolveStateRoot — mirrors scripts/lib/common.sh `state_root()`:
-//   - read .state_root from config/workspace.json
+//   - read .state_root from configDir/workspace.json
 //   - if non-empty, it MUST be an absolute path (die otherwise)
-//   - if empty, default to toolHome (the historical, unconfigured layout)
+//   - if empty, default to resolveConfigBase() (toolHome in legacy mode —
+//     the historical, unconfigured layout)
 function resolveStateRoot() {
   const cfg = readJson(WORKSPACE_CONFIG_PATH);
   const sr = cfg.state_root || "";
   if (sr !== "") {
     if (!path.isAbsolute(sr)) {
       console.error(
-        `error: config/workspace.json .state_root must be an absolute path (got '${sr}')`
+        `error: ${WORKSPACE_CONFIG_PATH} .state_root must be an absolute path (got '${sr}')`
       );
       process.exit(1);
     }
     return sr;
   }
-  return toolHome;
+  return resolveConfigBase();
 }
 
 // setStateRoot — write .state_root into config/workspace.json WITHOUT
@@ -78,18 +131,28 @@ function setStateRoot(value) {
 // output (and TTY prompts) pass straight through. `env` defaults to
 // process.env (spawnSync's own default) so every existing call site behaves
 // byte-for-byte the same; task-up passes an overlay to stamp MRW_WORK_TYPE.
+// MRW_CONFIG_DIR is ALWAYS added on top of whatever env is used (overriding
+// any inherited value) so the spawned script's own config_dir() walk-up
+// (which runs with cwd=toolHome, see below — NOT the caller's original cwd)
+// agrees with the configDir this CLI process itself discovered, rather than
+// relying on the script's independent walk-up landing on the same place.
 function runScript(relativeScriptPath, argv, env) {
   const scriptPath = path.join(toolHome, "scripts", relativeScriptPath);
+  const baseEnv = env || process.env;
   const result = spawnSync(scriptPath, argv, {
     stdio: "inherit",
     cwd: toolHome,
-    env: env || process.env,
+    env: { ...baseEnv, MRW_CONFIG_DIR: configDir },
   });
   handleSpawnResult(result, scriptPath);
 }
 
 function runCommand(cmd, argv) {
-  const result = spawnSync(cmd, argv, { stdio: "inherit", cwd: toolHome });
+  const result = spawnSync(cmd, argv, {
+    stdio: "inherit",
+    cwd: toolHome,
+    env: { ...process.env, MRW_CONFIG_DIR: configDir },
+  });
   handleSpawnResult(result, cmd);
 }
 
@@ -114,7 +177,11 @@ Usage: mrw <subcommand> [args...]
 
 Subcommands:
   help                                 print this usage
-  config [--state-root <abs|"">]       show (or set) toolHome/state_root/repos
+  config [--state-root <abs|"">]       show (or set) toolHome/config_dir/state_root/repos
+  init [dir]                           scaffold a per-workspace config at <dir>/.mrw/
+                                        (default cwd); copies workspace.json, repos.json,
+                                        purposes/, broker-policy.json from <toolHome>/config.
+                                        Refuses if <dir>/.mrw/ already exists.
   setup [args...]                      exec scripts/setup-workspace.sh
   infra-up [args...]                   exec scripts/devcontainer-up.sh
   infra-down [args...]                 docker compose down (the devcontainer stack)
@@ -132,6 +199,8 @@ Subcommands:
   doctor [args...]                     exec scripts/verify-workspace.sh
 
 toolHome resolves from mrw's own install location (works from any cwd).
+config_dir resolves from $MRW_CONFIG_DIR, else the nearest ancestor .mrw/
+(walking up from cwd), else <toolHome>/config (legacy default).
 See cli/README.md for details and deferred items.
 `;
 
@@ -169,7 +238,7 @@ function cmdConfig(argv) {
     }
     setStateRoot(newValue);
     if (newValue === "") {
-      console.log(`state_root cleared — back to the default (tool checkout: ${toolHome})`);
+      console.log(`state_root cleared — back to the default (${resolveConfigBase()})`);
     } else {
       console.log(`state_root set to: ${newValue}`);
     }
@@ -183,7 +252,10 @@ function cmdConfig(argv) {
 
   console.log(`toolHome:   ${toolHome}`);
   console.log(
-    `state_root: ${stateRoot} (${isDefault ? "default — unset in config/workspace.json, == toolHome" : "external — set in config/workspace.json"})`
+    `config_dir: ${configDir} (${configMode === "workspace" ? "workspace mode — per-workspace .mrw/" : "legacy — unset, == toolHome/config"})`
+  );
+  console.log(
+    `state_root: ${stateRoot} (${isDefault ? `default — unset in ${WORKSPACE_CONFIG_PATH}, == config base` : `external — set in ${WORKSPACE_CONFIG_PATH}`})`
   );
   console.log(`repos:      ${repoNames.length ? repoNames.join(", ") : "(none)"}`);
 }
@@ -554,6 +626,73 @@ function cmdTaskUp(argvIn) {
 }
 
 // ---------------------------------------------------------------------------
+// mrw init — scaffold a new per-workspace .mrw/ config directory, seeded
+// from toolHome's own config/ as a starting point. Purely a file copy: it
+// does not touch any generated state (repositories/, tasks/) and does not
+// run setup. Refuses to clobber an existing <dir>/.mrw/.
+function copyDirFlat(srcDir, destDir) {
+  fs.mkdirSync(destDir, { recursive: true });
+  for (const entry of fs.readdirSync(srcDir)) {
+    const src = path.join(srcDir, entry);
+    if (fs.statSync(src).isFile()) {
+      fs.copyFileSync(src, path.join(destDir, entry));
+    }
+  }
+}
+
+function cmdInit(argv) {
+  const targetDir = path.resolve(argv[0] || process.cwd());
+  const mrwDir = path.join(targetDir, ".mrw");
+
+  // SECURITY: refuse to scaffold a workspace config inside worker-writable
+  // state (a tasks/ segment). config resolution deliberately ignores any
+  // .mrw/ there, so one created here would be silently unused — and creating
+  // it normalizes exactly the layout the walk-up guard exists to reject.
+  if (underTasksSegment(targetDir)) {
+    console.error(
+      `error: refusing to create a .mrw/ under a 'tasks/' path (${targetDir}) — config there is worker-writable and is ignored by design.`
+    );
+    process.exit(1);
+  }
+
+  if (fs.existsSync(mrwDir)) {
+    console.error(
+      `error: ${mrwDir} already exists — refusing to overwrite an existing per-workspace config.`
+    );
+    process.exit(1);
+  }
+
+  const srcConfigDir = path.join(toolHome, "config");
+  fs.mkdirSync(mrwDir, { recursive: true });
+
+  for (const file of ["workspace.json", "repos.json", "broker-policy.json"]) {
+    const src = path.join(srcConfigDir, file);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, path.join(mrwDir, file));
+    } else {
+      console.error(`warning: ${src} not found in toolHome config — skipping`);
+    }
+  }
+
+  const srcPurposesDir = path.join(srcConfigDir, "purposes");
+  if (fs.existsSync(srcPurposesDir)) {
+    copyDirFlat(srcPurposesDir, path.join(mrwDir, "purposes"));
+  }
+
+  console.log(`Initialized a per-workspace config at ${mrwDir}`);
+  console.log("");
+  console.log("Next steps:");
+  console.log(`  1. Edit ${path.join(mrwDir, "repos.json")} — point it at your own repositories.`);
+  console.log(
+    `  2. Edit ${path.join(mrwDir, "workspace.json")} — set allowed_push_orgs (and any other fields) for this workspace.`
+  );
+  console.log(
+    `  3. Keep ${path.join(mrwDir, "broker-policy.json")} in sync with the same allowed_push_orgs/allowed_push_hosts (it is the authoritative gate on the container push path).`
+  );
+  console.log(`  4. cd ${targetDir} && mrw setup   # or: MRW_CONFIG_DIR=${mrwDir} mrw setup`);
+}
+
+// ---------------------------------------------------------------------------
 // main
 
 function main() {
@@ -568,6 +707,10 @@ function main() {
   switch (sub) {
     case "config":
       cmdConfig(rest);
+      break;
+
+    case "init":
+      cmdInit(rest);
       break;
 
     case "setup":

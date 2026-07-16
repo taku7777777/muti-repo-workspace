@@ -1,5 +1,5 @@
 {
-  "$schema_note": "Workspace-wide configuration. Fork this repository and edit this file (and repos.json / purposes/) for your own organization. This file is the ONLY config the scripts read — there is no local override file.",
+  "$schema_note": "Workspace-wide configuration. Fork this repository and edit this file (and repos.json / purposes/) for your own organization, OR run `mrw init <dir>` to scaffold a relocatable per-workspace copy under <dir>/.mrw/ (workspace.json, repos.json, purposes/, broker-policy.json) — scripts, the pre-push hook and `mrw` all discover the nearest ancestor .mrw/ by walking up from cwd (or $MRW_CONFIG_DIR if set), falling back to this tool checkout's config/ when no .mrw/ is found. This file (<toolHome>/config/workspace.json) is the default/fallback the scripts read when no per-workspace config is active.",
 
   "allowed_push_orgs": ["taku7777777"],
   "allowed_push_orgs_note": "GitHub orgs/users that git push is allowed to target, enforced by .githooks/pre-push in every cloned repo and worktree. Empty list = no restriction (a warning is printed on push).",
@@ -16,5 +16,8 @@
   "ticket_id_pattern_note": "Ticket IDs must match this pattern. The prefix is required and never auto-added.",
 
   "branch_prefix": "feat/",
-  "branch_prefix_note": "Task worktree branches are named <branch_prefix><TICKET_ID>."
+  "branch_prefix_note": "Task worktree branches are named <branch_prefix><TICKET_ID>.",
+
+  "state_root": "",
+  "state_root_note": "Absolute path where repositories/ and tasks/ live. Empty ⇒ the workspace base: in legacy mode (no .mrw/ active) that's the tool checkout (byte-for-byte identical to before this field existed); in workspace mode (a per-workspace .mrw/ is active — see $schema_note) that's the directory holding .mrw/. Config itself (this file, repos.json, purposes/, broker-policy.json) always lives in config_dir — <toolHome>/config by default/fallback, or <workspace-base>/.mrw/ when relocated with `mrw init`. Everything else (scripts/, templates/, harness/, .githooks/, .claude/, docker/, .devcontainer/) always stays in the tool checkout."
 }

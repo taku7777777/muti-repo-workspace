@@ -1,0 +1,38 @@
+{
+  "$note": "Defaults for `mrw serve` — the Thread B browser approval UI (see docs/browser-approval.md). ALL fields are optional; the serve process validates this file with zod and WARNS + falls back to a built-in default for any missing or invalid field rather than ever refusing to start. This file (and serve.css, if present alongside it) is workspace-owner-trusted host config — bind-mounted READ-ONLY into the `serve` container at /etc/mrw-serve (docker-compose.yml's `serve` service), the SAME trust tier as workspace.json/broker-policy.json: a cage can never write it, only the human operating this workspace can. `mrw init` copies this file (and serve.css, when present) into a new per-workspace .mrw/ the same way it copies workspace.json/repos.json/broker-policy.json.",
+
+  "port": 7787,
+  "port_note": "Published host port `mrw serve up` binds to by default (docker-compose.yml: 127.0.0.1:<port>:7787 — never anything but loopback). `mrw serve up --port N` overrides this file for a single run without editing it; `mrw serve url` reports whatever port is actually published on the running container.",
+
+  "theme": "auto",
+  "theme_note": "Initial theme shown on first load: 'auto' (follows the browser's prefers-color-scheme), 'light', or 'dark'. The page's own light/dark/auto toggle (persisted in the browser's localStorage) always wins over this default on every visit AFTER the first.",
+
+  "title": "mrw approval",
+  "title_note": "Page <title> and the sticky header's title text.",
+
+  "accentColor": "#0969da",
+  "accentColor_note": "Injected as the CSS custom property --accent (buttons, links, focus rings, the approve control). Any valid CSS color value.",
+
+  "pollIntervalMs": 2000,
+  "pollIntervalMs_note": "How often (in milliseconds) the page polls GET /api/state for a new/changed pending approval or a decided outcome. Lower = more responsive, more requests against the broker's approval socket.",
+
+  "diff": {
+    "view": "unified",
+    "wrap": false,
+    "tabSize": 8,
+    "collapseThresholdLines": 400,
+    "intralineHighlight": true
+  },
+  "diff_note": "Diff-viewer defaults — every one of these is also overridable per-session in the UI itself (a toggle), this only sets the INITIAL state. view: 'unified' or 'split' (side-by-side old/new columns). wrap: soft-wrap long lines instead of horizontal-scrolling them. tabSize: columns a tab character occupies. collapseThresholdLines: files with more changed lines than this (or over 100 KB) render collapsed behind a 'Load diff' button instead of expanded by default (rendered from data already fetched — serve never re-fetches from a repo, it has none). intralineHighlight: word-level highlighting of the exact changed span within a paired +/- line (falls back to whole-line highlighting when the lines don't line up).",
+
+  "sections": {
+    "body": true,
+    "commits": true,
+    "reviewer": true,
+    "fileTree": true
+  },
+  "sections_note": "Show/hide optional parts of the review UI, all default on. body: render the PR body's markdown on the Overview tab. commits: show the Commits(N) tab. reviewer: show the advisory-reviewer verdict card (only ever rendered when the broker actually returns one — this just lets an operator hide the card entirely). fileTree: show the Files-changed tab's collapsible directory sidebar (off falls back to a flat file list, still fully functional).",
+
+  "customCss": true,
+  "customCss_note": "When true AND SERVE_CONFIG_DIR/serve.css exists (i.e. a sibling serve.css next to this file), it is served as /assets/custom.css and loaded LAST — after the built-in app.css — for full cosmetic control. See docs/browser-approval.md's customization reference for the stable CSS custom-property surface (--bg, --fg, --accent, --add-bg/--del-bg, …) to override there instead of fighting the built-in rules."
+}

@@ -13,13 +13,23 @@ esac
 # Self-locating: <TASK_DIR>/agents/orchestrator/.claude/skills/add-repository-to-worker/scripts/
 SKILLS_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 TASK_DIR="$(cd "$SKILLS_DIR/../../../.." && pwd)"
-WORKSPACE_ROOT="$(cd "$TASK_DIR/../.." && pwd)"
 TICKET_ID="$(basename "$TASK_DIR")"
 
+# tool_home holds scripts/ + config/. In the unified container it is
+# TASK_DIR/../.. ; with an externalized state_root on the native path it is
+# NOT (that is state_root), so prefer a hint baked in at task-creation time
+# and fall back to the container-unified derivation.
+BAKED_TOOL_HOME="{{WORKSPACE_ROOT}}"
+if [ -f "$BAKED_TOOL_HOME/scripts/lib/common.sh" ]; then
+  TOOL_HOME="$BAKED_TOOL_HOME"
+else
+  TOOL_HOME="$(cd "$TASK_DIR/../.." && pwd)"
+fi
+
 # shellcheck source=/dev/null
-. "$WORKSPACE_ROOT/scripts/lib/common.sh"
+. "$TOOL_HOME/scripts/lib/common.sh"
 # shellcheck source=/dev/null
-. "$WORKSPACE_ROOT/scripts/lib/effects/worktree.sh"
+. "$TOOL_HOME/scripts/lib/effects/worktree.sh"
 
 PURPOSE="unknown"
 TASK_META="$TASK_DIR/.task-meta.json"
@@ -35,7 +45,7 @@ elif [ -f "$WORKER_SETTINGS" ]; then
   [ -n "$PURPOSE" ] || PURPOSE="unknown"
 fi
 
-BRANCH_PREFIX="$(json_get "$WORKSPACE_ROOT/config/workspace.json" '.branch_prefix' 'feat/')"
+BRANCH_PREFIX="$(json_get "$(config_dir)/workspace.json" '.branch_prefix' 'feat/')"
 BRANCH="${BRANCH_PREFIX}${TICKET_ID}"
 
 [ -n "$(repo_field "$REPO" name)" ] || die "'$REPO' is not defined in config/repos.json"
@@ -58,7 +68,7 @@ fi
 # including settings.local.json drift (S2-n). The authoritative guard remains
 # push time (push-create-pr.sh forces -c core.hooksPath).
 if [ -f "$WORKER_SETTINGS" ]; then
-  GIT_DIR_PATH="$WORKSPACE_ROOT/repositories/$REPO/.git"
+  GIT_DIR_PATH="$(state_root)/repositories/$REPO/.git"
   WT_PIN=""
   if WT_GITDIR="$(worktree_gitdir "$REPO" "$TICKET_ID")"; then
     WT_PIN="$WT_GITDIR/config.worktree"

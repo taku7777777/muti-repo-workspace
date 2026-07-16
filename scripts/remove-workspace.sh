@@ -27,7 +27,8 @@ FORCE=false
 validate_ticket_id "$TICKET_ID"
 
 WORKSPACE_ROOT="$(workspace_root)"
-TASK_DIR="$WORKSPACE_ROOT/tasks/$TICKET_ID"
+STATE_ROOT="$(state_root)"
+TASK_DIR="$STATE_ROOT/tasks/$TICKET_ID"
 [ -d "$TASK_DIR" ] || die "no such task: $TICKET_ID"
 
 # --- safety checks -----------------------------------------------------------

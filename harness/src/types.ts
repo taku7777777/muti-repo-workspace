@@ -39,3 +39,20 @@ export const ReviewSchema = z.object({
   summary: z.string(),
 });
 export type Review = z.infer<typeof ReviewSchema>;
+
+// --- TRIAGE ------------------------------------------------------------------
+// The "task-up triage leaf" (see triage.ts): a bounded, read-only classifier
+// run HOST-SIDE by `mrw task-up`, outside any cage, BEFORE a task workspace
+// exists. It reads only the ticket text (no repo cwd) and pre-fills
+// title/repos/work_type for create-workspace.sh. `repos` is typed as a plain
+// string[] here — zod cannot express "subset of a runtime-supplied list" — so
+// the subset constraint against the caller's availableRepos is enforced in
+// code (triage.ts's filterToAvailableRepos), not by this schema.
+export const WORK_TYPES = ["feature", "bugfix", "docs", "refactor", "chore", "test", "spike"] as const;
+export const TriageSchema = z.object({
+  work_type: z.enum(WORK_TYPES),
+  title: z.string().min(1).max(120),
+  repos: z.array(z.string()), // MUST be a subset of the available repo names passed in
+  summary: z.string(),
+});
+export type Triage = z.infer<typeof TriageSchema>;

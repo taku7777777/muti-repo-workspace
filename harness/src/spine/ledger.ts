@@ -17,9 +17,25 @@
  * `recordWorkerRun` clears both. `canPublish` re-checks the sha match anyway
  * (defense in depth), but the invalidation is what makes a stale "tests were
  * green ten actions ago" verdict impossible to smuggle through.
+ *
+ * Engine adaptation C (docs/mrw-chat.md "Deliberate engine adaptations" #3,
+ * Phase C2): this class used to be PERSIST-ONLY — a resumed process always
+ * built a fresh ledger via the constructor, which would silently refill
+ * budgets and re-derive `baseSha` from CURRENT HEAD (making a later review/
+ * publish diff cover only the post-restart delta, not the whole ticket).
+ * `SpineLedger.load()` restores a PREVIOUSLY PERSISTED snapshot verbatim
+ * instead — baseSha, consumed budgets, recorded plan/test/review/published
+ * verdicts (each still attesting the sha it was recorded at), and the
+ * ticket-level instruction `setInstruction()` records (spined/prepare.ts's
+ * job). The persisted JSON is versioned (`SPINE_LEDGER_VERSION`) and
+ * shape-checked with zod; `load()` fails CLOSED (throws) on anything it
+ * cannot fully trust — a missing file, invalid JSON, a shape/version
+ * mismatch, or a ticket mismatch — never a best-effort partial restore.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { z } from "zod";
+import { PlanSchema, ReviewSchema } from "../types.js";
 import type { Plan, Review } from "../types.js";
 
 // --- budgets (NaN-defensive, same pattern as sdk.ts's MAX_FIX_ATTEMPTS) ------
@@ -57,17 +73,78 @@ export interface LedgerBudgets {
  *  and the publish gate so callers (executor.ts) branch on the same shape. */
 export type LedgerCheck = { ok: true } | { ok: false; reason: string };
 
+/**
+ * Thrown ONLY by `SpineLedger.load()`. `.code` lets a caller (spined/index.ts)
+ * distinguish "there is no ledger yet" — `"missing"`, the ONE case where
+ * suggesting `spine-prepare` is safe — from "a ledger FILE EXISTS but could
+ * not be trusted" — any other code, where suggesting `spine-prepare` would be
+ * actively harmful: prepare.ts's own reseed guard aside (it independently
+ * refuses to overwrite an existing ledger without `--force`), the ADVICE
+ * text itself must not casually point at a command that wipes state (an
+ * independent review flagged exactly this: "corrupt/version-mismatch/shape
+ * errors should say what happened and NOT suggest a command that would wipe
+ * state").
+ */
+export type LedgerLoadErrorCode = "missing" | "invalid_json" | "shape_mismatch" | "ticket_mismatch";
+
+export class LedgerLoadError extends Error {
+  readonly code: LedgerLoadErrorCode;
+  constructor(code: LedgerLoadErrorCode, message: string) {
+    super(message);
+    this.name = "LedgerLoadError";
+    this.code = code;
+  }
+}
+
+// Bumped only if the persisted SHAPE changes in a way `load()` cannot parse
+// forward-compatibly. `load()` rejects any file whose `version` does not
+// match EXACTLY — see this file's header on why a best-effort partial
+// restore is never acceptable here.
+export const SPINE_LEDGER_VERSION = 1;
+
 // Serializable snapshot — what persist()/snapshot() write. Kept separate from
 // the live Map-backed class so JSON.stringify never has to know about Map.
 export interface LedgerSnapshot {
+  version: number;
   ticket: string;
   actionsUsed: number;
   maxActions: number;
   workerRunsUsed: number;
   maxWorkerRuns: number;
   repos: Record<string, RepoLedgerEntry>;
+  /** The ticket-level instruction (ExecutorDeps.instruction) — null until
+   *  setInstruction() has been called (spined/prepare.ts). Persisted so
+   *  SpineLedger.load() can hand it back to spined without re-asking. */
+  instruction: string | null;
   updatedAt: string;
 }
+
+// --- persisted-shape validation (SpineLedger.load()) -------------------------
+// Mirrors RepoLedgerEntry/LedgerSnapshot's TypeScript shapes exactly, reusing
+// the SAME Plan/Review schemas the rest of the pipeline trusts (types.ts) —
+// a persisted plan/review that no longer validates is exactly as untrustworthy
+// as one that never existed, so load() fails closed rather than casting.
+const PersistedRepoEntrySchema = z.object({
+  repoDir: z.string().min(1),
+  baseSha: z.string().min(1),
+  headSha: z.string().min(1),
+  plan: PlanSchema.nullable(),
+  testGreen: z.object({ sha: z.string().min(1) }).nullable(),
+  reviewApproved: z.object({ sha: z.string().min(1), review: ReviewSchema }).nullable(),
+  published: z.object({ sha: z.string().min(1), prUrl: z.string().nullable() }).nullable(),
+});
+
+const PersistedLedgerSchema = z.object({
+  version: z.literal(SPINE_LEDGER_VERSION),
+  ticket: z.string().min(1),
+  actionsUsed: z.number().int().min(0),
+  maxActions: z.number().int().min(0),
+  workerRunsUsed: z.number().int().min(0),
+  maxWorkerRuns: z.number().int().min(0),
+  repos: z.record(z.string(), PersistedRepoEntrySchema),
+  instruction: z.string().nullable(),
+  updatedAt: z.string(),
+});
 
 export class SpineLedger {
   readonly ticket: string;
@@ -81,6 +158,9 @@ export class SpineLedger {
   private readonly repos: Map<string, RepoLedgerEntry>;
   private actionsUsed = 0;
   private workerRunsUsed = 0;
+  /** The ticket-level instruction, set via setInstruction() (spined/prepare.ts)
+   *  and restored verbatim by load() — see LedgerSnapshot.instruction. */
+  private instructionText: string | null = null;
 
   constructor(
     ticket: string,
@@ -198,6 +278,24 @@ export class SpineLedger {
     entry.published = { sha, prUrl };
   }
 
+  // --- ticket-level instruction (Engine adaptation C) -------------------------
+  /** Record the ticket-level instruction so a later SpineLedger.load() can
+   *  hand it back to createExecutor() without re-asking the human — see
+   *  ExecutorDeps.instruction's header (executor.ts) on why this string is
+   *  fixed for the life of a session. Called by spined/prepare.ts right after
+   *  seeding a fresh ledger, before its first persist(). */
+  setInstruction(text: string): void {
+    this.instructionText = text;
+  }
+
+  /** null until setInstruction() has been called — the legacy REPL path
+   *  (spine/index.ts) never calls it; it threads its own instruction straight
+   *  into createExecutor() instead, so its ledgers simply persist `null` here
+   *  (harmless: that path never calls load()). */
+  getInstruction(): string | null {
+    return this.instructionText;
+  }
+
   // --- the publish gate ------------------------------------------------------
   /** ok only if: a plan is recorded, tests are green AT the current HEAD, and
    *  an approving review is recorded of the current HEAD. Names exactly what
@@ -233,14 +331,91 @@ export class SpineLedger {
   // --- persistence -------------------------------------------------------
   snapshot(): LedgerSnapshot {
     return {
+      version: SPINE_LEDGER_VERSION,
       ticket: this.ticket,
       actionsUsed: this.actionsUsed,
       maxActions: this.maxActions,
       workerRunsUsed: this.workerRunsUsed,
       maxWorkerRuns: this.maxWorkerRuns,
       repos: Object.fromEntries(this.repos.entries()),
+      instruction: this.instructionText,
       updatedAt: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Engine adaptation C (docs/mrw-chat.md #3): restore a ledger a PRIOR
+   * process persisted to `<dir>/spine-ledger.json`, exactly as recorded —
+   * see this file's header for why a fresh constructor() call is wrong for
+   * resume (it would re-derive baseSha from current HEAD and refill
+   * budgets). Fails CLOSED — throws a typed `LedgerLoadError`, never returns
+   * a partially-restored ledger — when: the file is missing/unreadable
+   * (`.code: "missing"` — spined/index.ts turns ONLY this one into its "run
+   * the prepare step first" startup advice), not valid JSON
+   * (`"invalid_json"`), does not match `PersistedLedgerSchema` — including a
+   * `version` mismatch, `.code: "shape_mismatch"` — or was persisted for a
+   * different ticket than requested (`"ticket_mismatch"`). Every code other
+   * than `"missing"` means a ledger FILE EXISTS but could not be trusted —
+   * callers must not casually suggest re-running spine-prepare there (it
+   * would overwrite the very state that needs inspecting).
+   */
+  static load(ticket: string, dir: string): SpineLedger {
+    const file = path.join(dir, "spine-ledger.json");
+    let raw: string;
+    try {
+      raw = fs.readFileSync(file, "utf8");
+    } catch (e) {
+      throw new LedgerLoadError("missing", `SpineLedger.load(): no persisted ledger at '${file}' (${(e as Error).message})`);
+    }
+    let json: unknown;
+    try {
+      json = JSON.parse(raw);
+    } catch (e) {
+      throw new LedgerLoadError(
+        "invalid_json",
+        `SpineLedger.load(): '${file}' is not valid JSON (fail-closed): ${(e as Error).message}`,
+      );
+    }
+    const parsed = PersistedLedgerSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new LedgerLoadError(
+        "shape_mismatch",
+        `SpineLedger.load(): '${file}' does not match the expected ledger shape/version ` +
+          `${SPINE_LEDGER_VERSION} (fail-closed): ${parsed.error.message}`,
+      );
+    }
+    const snap = parsed.data;
+    if (snap.ticket !== ticket) {
+      throw new LedgerLoadError(
+        "ticket_mismatch",
+        `SpineLedger.load(): persisted ledger at '${file}' is for ticket '${snap.ticket}', not '${ticket}' (fail-closed).`,
+      );
+    }
+
+    // Seed with NO repos via the ordinary constructor (it would set
+    // headSha=baseSha and null out every verdict — exactly what load() must
+    // NOT do), then restore every field directly from the persisted snapshot.
+    const ledger = new SpineLedger(
+      snap.ticket,
+      {},
+      { maxActions: snap.maxActions, maxWorkerRuns: snap.maxWorkerRuns },
+      dir,
+    );
+    ledger.actionsUsed = snap.actionsUsed;
+    ledger.workerRunsUsed = snap.workerRunsUsed;
+    ledger.instructionText = snap.instruction;
+    for (const [name, entry] of Object.entries(snap.repos)) {
+      ledger.repos.set(name, {
+        repoDir: entry.repoDir,
+        baseSha: entry.baseSha,
+        headSha: entry.headSha,
+        plan: entry.plan,
+        testGreen: entry.testGreen,
+        reviewApproved: entry.reviewApproved,
+        published: entry.published,
+      });
+    }
+    return ledger;
   }
 
   /** Atomic write (temp + rename — same pattern as multi/state.ts's

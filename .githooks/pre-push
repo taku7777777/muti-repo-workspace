@@ -12,7 +12,30 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKSPACE_ROOT="$(dirname "$HOOK_DIR")"
-CONFIG="$WORKSPACE_ROOT/config/workspace.json"
+
+# Resolve the workspace config: a per-workspace .mrw/workspace.json found by
+# walking up from the pushing worktree (git runs the hook with cwd = the work
+# tree), else the tool checkout's config (legacy). Fail-open stays below.
+# This walk-up MUST match scripts/lib/common.sh's config_dir() and
+# cli/mrw.mjs's JS implementation exactly (see common.sh's config_dir doc
+# comment) — all three resolve the SAME config_dir for the same cwd/env.
+# NOTE: the broker independently enforces allowed_push_orgs in-process from
+# broker-policy.json (the authoritative gate on the container path); this
+# hook is defence-in-depth for the native (non-containerized) push path.
+_cfg=""
+_d="$PWD"
+while [ "$_d" != "/" ]; do
+  # SECURITY: skip any .mrw/ under a tasks/ segment (worker-writable state) —
+  # a worker could commit .mrw/workspace.json into its own worktree to spoof
+  # this allowlist. The legit workspace .mrw/ is a sibling of tasks/, above
+  # it. MUST match scripts/lib/common.sh's config_dir() and cli/mrw.mjs.
+  case "$_d" in
+    */tasks|*/tasks/*) _d="$(dirname "$_d")"; continue ;;
+  esac
+  if [ -f "$_d/.mrw/workspace.json" ]; then _cfg="$_d/.mrw/workspace.json"; break; fi
+  _d="$(dirname "$_d")"
+done
+CONFIG="${_cfg:-$WORKSPACE_ROOT/config/workspace.json}"
 
 REMOTE_URL="${2:-}"
 

@@ -17,6 +17,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/common.sh
+. "$SCRIPT_DIR/lib/common.sh"
+
 KEYCHAIN_SERVICE="claude-code-oauth-token"
 
 if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
@@ -29,6 +33,33 @@ if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
     echo "  or export CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY before running this script." >&2
     exit 1
   fi
+fi
+
+# Point the compose state binds at the configured state_root (repositories/ +
+# tasks/ + chat/). Unset ⇒ compose falls back to `..` (the tool checkout) =
+# legacy — chat/ there is covered by the tracked chat/.gitkeep (.gitignore),
+# same as tasks/repositories's own .gitkeep files.
+_state_root="$(state_root)"
+if [ "$_state_root" != "$(workspace_root)" ]; then
+  export MRW_STATE_ROOT="$_state_root"
+  # chat/ (docs/mrw-chat.md Phase C3, scripts/chat-up.sh's render target)
+  # MUST pre-exist here too: an externalized state_root has no tracked
+  # chat/.gitkeep of its own, so without this the nested bind mount's source
+  # would be missing at `docker compose up` time and Docker would auto-create
+  # it itself — root-owned on native Linux hosts, which would then make
+  # chat-up.sh's own (non-root) `mkdir -p "$CHAT_DIR/.claude"` fail EACCES.
+  mkdir -p "$_state_root/tasks" "$_state_root/repositories" "$_state_root/chat"
+fi
+
+# Point the compose broker-policy bind at the active config_dir (workspace.json
+# / repos.json / purposes/ / broker-policy.json). Unset ⇒ compose falls back
+# to `../config` (the tool checkout) = legacy, byte-identical to Phase 1.
+_config_dir="$(config_dir)"
+if [ "$_config_dir" != "$(workspace_root)/config" ]; then
+  case "$_config_dir" in
+    /*) export MRW_CONFIG_DIR="$_config_dir" ;;
+    *)  die "config_dir ('$_config_dir') must be an absolute path to be used as a container bind source (got a relative MRW_CONFIG_DIR?)" ;;
+  esac
 fi
 
 # Idempotent: the `telemetry` network is `external: true` in the compose

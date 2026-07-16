@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "spine": {
+      "command": "{{HARNESS_RUN_DIR}}/node_modules/.bin/tsx",
+      "args": [
+        "{{HARNESS_RUN_DIR}}/src/spined/index.ts",
+        "--ticket", "{{TICKET_ID}}",
+        "--repos", "{{REPOS_CSV}}",
+        "--purpose", "{{PURPOSE}}"
+      ],
+      "env": {
+        "MRW_STATE_DIR": "{{SPINE_STATE_DIR}}",
+        "MRW_WORKSPACE_ROOT": "{{CONTAINER_WORKSPACE_ROOT}}",
+        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
+        "CLAUDE_CODE_OAUTH_TOKEN": "${CLAUDE_CODE_OAUTH_TOKEN}"
+      }
+    }
+  }
+}

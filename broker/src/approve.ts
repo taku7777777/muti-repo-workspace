@@ -17,6 +17,13 @@
  * The gate is CANCELLABLE (F5): an AbortSignal (from the approval budget or a
  * dropped client) rejects the prompt, so the handler returns fail-closed and never
  * proceeds to push.
+ *
+ * Thread C / Phase C2 (docs/mrw-chat.md "Gate policy"): the header also
+ * renders a broker-computed test-independence caveat (caveat.ts) next to the
+ * M3 advisory-reviewer line, ADVISORY ONLY like that line — it never gates
+ * the sha-typed confirmation below. This is the one place that caveat used
+ * to render for the spined path too (the in-container y/N ack), before
+ * approvalPolicy 'broker-only' removed that in-chat prompt.
  */
 import * as readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
@@ -47,6 +54,15 @@ export interface ApprovalView {
   // failed (render an explicit no-verdict line so an outage is never
   // mistaken for an approval); a verdict = render it.
   reviewerVerdict: ReviewerVerdict | "unavailable" | null;
+  // Thread C / Phase C2 (docs/mrw-chat.md "Gate policy", "Deliberate engine
+  // adaptations" #4): true when caveat.ts's diffTouchesTests() matches this
+  // SAME ground-truth `diff` — i.e. the change touches test files/config, so
+  // the green test gate may not be independent of the coder's edits. Always
+  // a plain boolean (not tri-state like reviewerVerdict — there is no
+  // "feature off" state; this is a pure function of the diff, always
+  // computed). Advisory only, exactly like reviewerVerdict: rendered next to
+  // it, never changes the sha-typed gate below.
+  testCaveat: boolean;
 }
 
 const PAGE_LINES = 400;
@@ -68,8 +84,18 @@ function foldNotes(notes: string, max = MAX_NOTES_CHARS): string {
   return folded.slice(0, Math.max(0, max - 1)).trimEnd() + "…";
 }
 
-/** The summary shown before the diff — everything except the (paged) diff body. */
-function renderHeader(v: ApprovalView): string {
+/** The summary shown before the diff — everything except the (paged) diff
+ *  body. Exported (independent review, SHOULD-FIX #3a) so the caveat/
+ *  reviewer-verdict rendering is directly unit-testable without driving the
+ *  real readline-backed approveAtBroker() (which needs live stdin — see
+ *  gate.test.ts's header on why this codebase deliberately never does
+ *  that). renderHeader() is a PURE string formatter — it takes no signal,
+ *  resolves no promise, and is never awaited — so testing it directly also
+ *  demonstrates structurally that testCaveat/reviewerVerdict can only ever
+ *  change what is RENDERED here, never the sha-typed confirmation below
+ *  (approveAtBroker's `answer.trim() === short` gate), which this function
+ *  has no way to reach or influence. */
+export function renderHeader(v: ApprovalView): string {
   const lines: string[] = [];
   lines.push("");
   lines.push("================ PUBLISH REQUEST (ground truth from git) ================");
@@ -113,6 +139,12 @@ function renderHeader(v: ApprovalView): string {
         ? `advisory reviewer: approve — ${notes}`
         : `advisory reviewer: CONCERNS — ${notes}`,
     );
+    lines.push("");
+  }
+  // Broker-computed test-independence caveat (Thread C, caveat.ts) — next to
+  // the reviewer line above, same advisory posture: rendered, never gates.
+  if (v.testCaveat) {
+    lines.push("caveat: diff touches test files/config — the green-tests gate may not be independent");
     lines.push("");
   }
   lines.push("========================================================================");

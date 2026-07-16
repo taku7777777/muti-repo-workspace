@@ -34,7 +34,9 @@ require_cmd git
 require_cmd jq
 
 WORKSPACE_ROOT="$(workspace_root)"
-WS_CONFIG="$WORKSPACE_ROOT/config/workspace.json"
+STATE_ROOT="$(state_root)"
+CONFIG_DIR="$(config_dir)"
+WS_CONFIG="$CONFIG_DIR/workspace.json"
 
 TICKET_ID=""
 PURPOSE=""
@@ -68,12 +70,12 @@ done
 [ -n "$TICKET_ID" ] || die "--ticket is required"
 validate_ticket_id "$TICKET_ID"
 
-TASK_DIR="$WORKSPACE_ROOT/tasks/$TICKET_ID"
+TASK_DIR="$STATE_ROOT/tasks/$TICKET_ID"
 META="$TASK_DIR/.workspace-meta.json"
 BRANCH_PREFIX="$(json_get "$WS_CONFIG" '.branch_prefix' 'feat/')"
 BRANCH="${BRANCH_PREFIX}${TICKET_ID}"
 TASK_DIR_H="$(to_home_path "$TASK_DIR")"
-export WORKSPACE_ROOT TASK_DIR TASK_DIR_H TICKET_ID BRANCH TITLE TICKET_URL
+export WORKSPACE_ROOT STATE_ROOT CONFIG_DIR TASK_DIR TASK_DIR_H TICKET_ID BRANCH TITLE TICKET_URL
 
 # ---------------------------------------------------------------------------
 phase_init() {
@@ -83,7 +85,7 @@ phase_init() {
   fi
   list_purposes | grep -qx "$PURPOSE" \
     || die "unknown purpose '$PURPOSE' (available: $(list_purposes | tr '\n' ' '))"
-  PURPOSE_JSON="$WORKSPACE_ROOT/config/purposes/$PURPOSE.json"
+  PURPOSE_JSON="$CONFIG_DIR/purposes/$PURPOSE.json"
 
   # dev_kind
   if [ -n "$DEV_KIND" ]; then
@@ -103,7 +105,7 @@ phase_init() {
   local r
   for r in $repos; do
     [ -n "$(repo_field "$r" name)" ] || die "repository '$r' is not defined in config/repos.json"
-    [ -e "$WORKSPACE_ROOT/repositories/$r/.git" ] \
+    [ -e "$STATE_ROOT/repositories/$r/.git" ] \
       || die "repository '$r' is not cloned — run /setup-workspace first"
   done
   [ -n "$repos" ] || warn "no repositories selected — the task will have no worktrees (add later with add-repository)"
@@ -141,7 +143,7 @@ load_meta() {
   # --no-sandbox tasks back to sandboxed.
   SANDBOX="$(jq -r 'if .sandbox == false then "false" else "true" end' "$META")"
   REPOS="$(jq -r '.repos | join(" ")' "$META")"
-  PURPOSE_JSON="$WORKSPACE_ROOT/config/purposes/$PURPOSE.json"
+  PURPOSE_JSON="$CONFIG_DIR/purposes/$PURPOSE.json"
   export PURPOSE TITLE TICKET_URL
 }
 
@@ -181,7 +183,7 @@ generate_agent_settings() {
   if [ "$role" = "worker" ] && [ "$SANDBOX" = "true" ]; then
     local r t2 gitdir wt_gitdir wt_pin
     for r in $REPOS; do
-      gitdir="$WORKSPACE_ROOT/repositories/$r/.git"
+      gitdir="$STATE_ROOT/repositories/$r/.git"
       wt_pin=""
       if wt_gitdir="$(worktree_gitdir "$r" "$TICKET_ID")"; then
         wt_pin="$wt_gitdir/config.worktree"
@@ -305,6 +307,15 @@ phase_finalize() {
   cp -R "$WORKSPACE_ROOT/templates/task-orchestrator/skills/." \
     "$TASK_DIR/agents/orchestrator/.claude/skills/"
   find "$TASK_DIR/agents/orchestrator/.claude/skills" -name '*.sh' -exec chmod +x {} +
+  # Bake the tool_home hint into add-repository.sh so it can locate
+  # scripts/lib/common.sh on the native path when state_root is externalized
+  # (TASK_DIR/../.. there is state_root, not tool_home). WORKSPACE_ROOT is
+  # already exported above = tool_home.
+  _addrepo="$TASK_DIR/agents/orchestrator/.claude/skills/add-repository-to-worker/scripts/add-repository.sh"
+  if [ -f "$_addrepo" ]; then
+    _tmp="$(mktemp)"; render_template "$_addrepo" > "$_tmp" && mv "$_tmp" "$_addrepo"
+    chmod +x "$_addrepo"
+  fi
 
   # --- MCP -------------------------------------------------------------------
   if [ "$MCP_SERVERS_JSON" != "[]" ]; then

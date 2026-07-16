@@ -65,9 +65,14 @@ coded spine(痩せた harness — プログラム)
    fail-closed であり、「もう1回だけ」は無い。
 4. **publish は broker ソケット越しの型付き intent のみ。** orchestrator は
    git/gh コマンドを組み立てられない(そもそも Bash を持たない)。
-5. **人間との対話はスキップも代答もできない。** ターミナルは spine が所有し、
-   `ask_human` は人間が実際にタイプした内容を返す。broker の sha タイプゲートが
-   publish の権威ある承認であり続ける。
+5. **人間との対話はスキップも代答もできない。** broker の sha タイプゲートが
+   すべての経路で publish の権威ある承認であり続ける。旧 REPL 経路では加えて
+   ターミナルを spine が所有する（`ask_human` は人間が実際にタイプした内容を
+   返す）。Thread C のチャット経路（[mrw-chat.md](mrw-chat.ja.md)）では
+   チャットそのものが人間チャネルであり、チャット内 y/N ゲートは*設計として*
+   存在しない（チャット返答はモデル仲介でありゲートとして無価値のため）:
+   publish 経路の人間の行為は broker にのみ在り、`ask_human`/`show_human` は
+   MCP に公開されない。
 6. **遷移規則そのものは、どのケージからも書き換えられない**
    (トポロジ参照 — spine は worker からも orchestrator セッションからも
    書き込めない場所で動く)。
@@ -113,6 +118,27 @@ worker にはできない)。
   人間は orchestrator と話す。spine は見えないミドルウェアである。*何を・いつ・
   どう*確認するかは orchestrator の判断(それがこの設計の眼目)、不変条件の
   ゲートで*人間に確認が行われること*は spine の担当。
+
+**Thread C 更新（2026-07-16/17、オペレーターと合意 —
+[mrw-chat.md](mrw-chat.ja.md)）:** 上記の再検討条件は、この節の想定とは
+別の形で満たされた。対話ループにフックでレールを敷くのではなく、**効果の
+境界の方が動いた**: spine は独立 stdio MCP デーモン（`harness/src/spined/`）
+としても動き、対話 Claude Code セッションは typed な `mcp__spine__*` 以外の
+能力を一切持たない — すべての効果が今も `executor.dispatch()` を通るため、
+ループ自体にレールは不要になった。この節の 2 つの主張を C1/C3 のライブ実測
+（claude v2.1.211）と整合させる:
+
+- 「アプリ内 permission 層はこのワークスペース自身の計測で fail-open」—
+  その計測は permission **プロンプト**層（人間が `ask` を承認して通せる）の
+  もの。`permissions.deny` ルールは逆の実測結果: fail-closed かつ非バイパスで、
+  deny された built-in は**セッションのツールセットから丸ごと消える**。
+  Thread C の姿勢は deny の即時拒否 + MCP ツールの事前許可で、誤承認できる
+  プロンプト自体を残さない。
+- 「対話体験に近い対話面」の UX 要求は Claude Code 本体で満たされた;
+  `spine/repl.ts` は headless/フォールバック面として残る。
+
+この節の SDK 決定は、非対話の leaf（PLAN / REVIEW / IMPLEMENT / triage）
+すべてについて今も有効 — Thread C が動かしたのは真に対話的な唯一の面だけ。
 
 ## broker 側 reviewer(合意済み、3条件 + 1拡張)
 

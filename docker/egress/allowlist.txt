@@ -8,6 +8,17 @@
 # --- REQUIRED: Anthropic inference (the SDK / CLI endpoint) ---
 api.anthropic.com
 
+# --- REQUIRED (Thread C chat frontend): interactive `claude` CLI ---
+# The interactive TUI (mrw chat's orchestrator session) needs this in
+# addition to api.anthropic.com — squid-log-verified 2026-07-16: the only
+# denied host on a live `mrw chat` launch (3x TCP_DENIED platform.claude.com:443;
+# statsig/sentry stayed silent thanks to CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).
+# Anthropic-owned SINGLE-TENANT host — same trust class as api.anthropic.com,
+# NOT a multi-tenant sink (see the sentry.io removal note below). Shared-
+# allowlist trade accepted (operator decision 2026-07-16): worker/reviewer
+# gain the same host until Phase 4 per-role allowlists.
+platform.claude.com
+
 # --- Node / npm: needed by the harness `npm ci` and (npm-based) test gates ---
 registry.npmjs.org
 

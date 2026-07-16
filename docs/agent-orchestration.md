@@ -69,9 +69,15 @@ permissions).
    Exhaustion is fail-closed, never "one more try".
 4. **Publish is only ever a typed intent** over the broker socket; the
    orchestrator cannot compose git/gh commands (it has no Bash at all).
-5. **Human interaction cannot be skipped or answered by the LLM.** The spine
-   owns the terminal; `ask_human` returns what the human actually typed. The
-   broker's sha-typed gate remains the authoritative publish approval.
+5. **Human interaction cannot be skipped or answered by the LLM.** The
+   broker's sha-typed gate remains the authoritative publish approval on
+   every path. On the legacy REPL path the spine additionally owns the
+   terminal (`ask_human` returns what the human actually typed). On the
+   Thread-C chat path ([mrw-chat.md](mrw-chat.md)) the chat itself is the
+   human channel, so the in-chat y/N gates are gone *by design* (a chat
+   reply would be model-mediated and worthless as a gate): the publish-path
+   human act lives only at the broker, and `ask_human`/`show_human` are not
+   exposed over MCP.
 6. **The transition rules themselves are not writable from any cage**
    (see topology — the spine runs where neither worker nor orchestrator
    sessions can write).
@@ -119,6 +125,30 @@ Decision: **Agent SDK**, not the interactive TUI and not headless `-p` calls.
   the orchestrator; the spine is invisible middleware. What to ask, when, and
   how to phrase it is the orchestrator's judgment (that is the point); *that
   the human is asked* at the invariant gates is the spine's.
+
+**Thread C update (2026-07-16/17, decided with the operator —
+[mrw-chat.md](mrw-chat.md)):** the revisit condition above is satisfied,
+though not the way this section anticipated. Instead of hooks railing the
+interactive loop, the *effects boundary moved*: the spine now also runs as a
+standalone stdio MCP daemon (`harness/src/spined/`), and an interactive
+Claude Code session holds no capability beyond its typed `mcp__spine__*`
+tools — the loop no longer needs railing because every effect still crosses
+`executor.dispatch()`. Two claims above, reconciled with the C1/C3 live
+measurements (claude v2.1.211):
+
+- *"its in-app permission layer is fail-open by this workspace's own
+  measurements"* — that measurement was of the permission-**prompt** layer
+  (a human can approve past an `ask`). `permissions.deny` rules measured
+  the opposite: fail-closed and non-bypassable — denied built-ins are
+  **removed from the session's tool set entirely**. The Thread-C posture
+  uses deny outright plus pre-allowed MCP tools, leaving no prompts to
+  mis-approve.
+- The "dialogue surface" UX requirement is now met by Claude Code itself;
+  `spine/repl.ts` remains as the headless/fallback surface.
+
+The SDK decision in this section still stands for every non-interactive
+leaf (PLAN / REVIEW / IMPLEMENT / triage) — Thread C moved only the one
+genuinely conversational surface.
 
 ## Broker-side reviewer (agreed, 3 conditions + 1 extension)
 

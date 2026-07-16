@@ -81,9 +81,11 @@ chat — moves onto Claude Code.
     (every dispatched action burns budget by design; a "summon any time"
     status must not).
   - **Single instance per ticket**: spined takes an exclusive lockfile in the
-    ledger dir; a second daemon (second chat tab, or chat + legacy REPL) on
-    the same ticket fails closed with a clear message. Without this, two
-    executors would double the budget rails and last-writer-win the ledger.
+    ledger dir; a second daemon (second chat tab) on the same ticket fails
+    closed with a clear message. Without this, two executors would double the
+    budget rails and last-writer-win the ledger. The **legacy REPL does not
+    take this lock yet** — chat + REPL concurrency on one ticket stays
+    unenforced until the REPL adopts it (tracked for C4).
   - **Keep-alive progress**: during a long dispatch (`run_worker`, minutes)
     the daemon emits coarse MCP progress notifications from a timer
     ("run_worker … Ns elapsed", ~10 s cadence). C1 proved these render live
@@ -225,7 +227,9 @@ push.
   `status` budget-exempt; broker caveat line unit-tested.
 - **C3 — frontend config + wiring.** Acceptance: render-target guard refuses
   `tasks/`-segment paths; trust stamp automated; `enabledMcpjsonServers`
-  present; pinned CLI install that fails the build on error; MCP timeouts
+  present; `.mcp.json` spawns `tsx src/spined/index.ts` **directly** (an
+  `npm run` wrapper prints its own banner to stdout and would corrupt the
+  JSON-RPC wire before spined's stdio guard exists); pinned CLI install that fails the build on error; MCP timeouts
   pinned above the worker budget; keep-alive progress visible in a real
   session; launcher refuses when the stack is down (container-only);
   `chat-home` volume; selfcheck extension (deny posture + `claudeMdExcludes`

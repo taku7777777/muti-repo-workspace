@@ -124,7 +124,8 @@ export type ActionErrorCode =
   | "repo_unknown" // repo not in this ticket's ledger
   | "step_failed" // the underlying harness step (worker/test/review/plan) threw or was incomplete
   | "publish_declined" // a human said no at a publish gate
-  | "publish_failed"; // publish() threw (broker refusal / transport error)
+  | "publish_failed" // publish() threw (broker refusal / transport error)
+  | "session_ended"; // Engine adaptation B (docs/mrw-chat.md #2): dispatch() called after done()/abort() already recorded a terminal outcome. A real behavior change, not just a spined-only concern — spine/session.ts's tool handlers call dispatch() straight from the model's tool-call turn, independent of repl.ts's own prompt loop, so a same-turn extra tool call that used to EXECUTE is now refused here (see executor.ts's dispatch() for the full explanation).
 
 export interface ActionFailure {
   ok: false;

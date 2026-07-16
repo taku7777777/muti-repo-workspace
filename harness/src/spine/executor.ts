@@ -10,12 +10,29 @@
  *
  * Two invariants this file is the enforcement point for:
  *   - Invariant 5 ("the spine owns the terminal"): `askHuman`/`say` are
- *     INJECTED by the REPL (spine/repl.ts), never created here. This file
- *     must never open its own readline — a human question always resolves to
- *     what the human actually typed into the ONE terminal interface.
+ *     INJECTED by the caller (spine/repl.ts for the legacy REPL; spined's
+ *     unreachable-by-construction stubs for the daemon — see spined/index.ts),
+ *     never created here. This file must never open its own readline — a
+ *     human question always resolves to what the human actually typed into
+ *     the ONE terminal interface, for whichever caller supplied askHuman.
  *   - Serial execution: a second dispatch() while one is in flight is refused
  *     with `busy`, never queued silently — the ledger/terminal are not
  *     re-entrant.
+ *
+ * Two Phase-C2 engine adaptations live here (docs/mrw-chat.md "Deliberate
+ * engine adaptations" — the honest, small, test-covered list):
+ *   A. ExecutorDeps.approvalPolicy ("in-chat" default | "broker-only"):
+ *      request_publish's y/N gates are HERE, not in the REPL — so removing
+ *      them "from the publish path" unqualified would silently strip the
+ *      legacy REPL too. "in-chat" (spine/repl.ts's callers) is byte-identical
+ *      to before this adaptation existed; spined injects "broker-only" (no
+ *      terminal to ask on — see ExecutorDeps.approvalPolicy's own comment).
+ *   B. Post-ended dispatch refusal: dispatch() itself now refuses with a
+ *      typed `session_ended` once done()/abort() has recorded a terminal
+ *      outcome, instead of relying on the caller's own loop to stop calling
+ *      it (the REPL's `while (!executor.isEnded())` already did; spined has
+ *      no loop at all — an MCP client could otherwise keep calling tools
+ *      after done()/abort()).
  */
 import { execImplement, execTests } from "../exec.js";
 import { commitRangeDiff, revParseHead } from "../gitops.js";
@@ -49,9 +66,30 @@ export interface ExecutorDeps {
    * judging against the original framing.
    */
   instruction: string;
-  /** Owned by the REPL (spine/repl.ts) — this file must never create its own. */
+  /** Owned by the caller (spine/repl.ts, or spined's unreachable stubs) —
+   *  this file must never create its own. */
   askHuman: (question: string) => Promise<string>;
   say: (line: string) => void;
+  /**
+   * Engine adaptation A (docs/mrw-chat.md "Deliberate engine adaptations"
+   * #1). Governs ONLY request_publish's human-approval block below:
+   *   - "in-chat" (default): today's REPL behavior, BYTE-IDENTICAL to before
+   *     this field existed — showForApproval() prints the diff, an
+   *     ack-then-y/N gate fires when diffTouchesTests(), then a final y/N
+   *     "Publish?" — all via the injected askHuman/say above, i.e. whatever
+   *     terminal spine/repl.ts owns.
+   *   - "broker-only": spined's policy. There is no terminal to ask on — the
+   *     MCP client's "human" is the orchestrator LLM, and a chat reply would
+   *     be model-mediated and worthless as a gate (docs/mrw-chat.md "Gate
+   *     policy"). request_publish skips showForApproval, the
+   *     diffTouchesTests ack, AND the final y/N, going straight to publish()
+   *     once the ledger gate (canPublish) and a fresh diff-completeness
+   *     re-check both pass. Authority does NOT move: the broker's own
+   *     SHA-typed human gate (broker/src/approve.ts) remains the one
+   *     authoritative approval either way — this only removes a REDUNDANT
+   *     in-container prompt that broker-only has no way to render safely.
+   */
+  approvalPolicy?: "in-chat" | "broker-only";
 }
 
 export interface Executor {
@@ -100,6 +138,7 @@ function isYes(answer: string): boolean {
 
 export function createExecutor(deps: ExecutorDeps): Executor {
   const { ledger, instruction: ticketInstruction, askHuman, say } = deps;
+  const approvalPolicy = deps.approvalPolicy ?? "in-chat";
 
   let busy = false;
   let ended: EndedInfo | null = null;
@@ -246,26 +285,31 @@ export function createExecutor(deps: ExecutorDeps): Executor {
           };
         }
 
-        // Human approval — reuses orchestrator.ts's showForApproval (diff
-        // view) + steps.ts's diffTouchesTests (test-independence caveat), but
-        // asks via the injected askHuman so the SPINE's single terminal
-        // interface remains the only place a human answer can come from
-        // (invariant 5).
-        showForApproval(r.entry.plan?.summary ?? "(no plan recorded)", r.entry.reviewApproved?.review ?? null, wd.diff);
+        // Human approval — Engine adaptation A. "in-chat" (default) is
+        // BYTE-IDENTICAL to before approvalPolicy existed: reuses
+        // orchestrator.ts's showForApproval (diff view) + steps.ts's
+        // diffTouchesTests (test-independence caveat), asking via the
+        // injected askHuman so the SPINE's single terminal interface remains
+        // the only place a human answer can come from (invariant 5).
+        // "broker-only" skips this entire block — see ExecutorDeps's header
+        // on why — and falls straight through to publish() below.
+        if (approvalPolicy === "in-chat") {
+          showForApproval(r.entry.plan?.summary ?? "(no plan recorded)", r.entry.reviewApproved?.review ?? null, wd.diff);
 
-        if (diffTouchesTests(wd.diff)) {
-          const ack = await askHuman(
-            "[warn] this change touches test files or the test command, so the green test gate " +
-              "may not be independent of the worker's edits. Acknowledge and continue? [y/N]",
-          );
-          if (!isYes(ack)) {
-            return { ok: false, code: "publish_declined", error: "declined at the test-independence caveat" };
+          if (diffTouchesTests(wd.diff)) {
+            const ack = await askHuman(
+              "[warn] this change touches test files or the test command, so the green test gate " +
+                "may not be independent of the worker's edits. Acknowledge and continue? [y/N]",
+            );
+            if (!isYes(ack)) {
+              return { ok: false, code: "publish_declined", error: "declined at the test-independence caveat" };
+            }
           }
-        }
 
-        const finalAnswer = await askHuman("Tests green and review approved. Publish? [y/N]");
-        if (!isYes(finalAnswer)) {
-          return { ok: false, code: "publish_declined", error: "human declined publish" };
+          const finalAnswer = await askHuman("Tests green and review approved. Publish? [y/N]");
+          if (!isYes(finalAnswer)) {
+            return { ok: false, code: "publish_declined", error: "human declined publish" };
+          }
         }
 
         try {
@@ -304,6 +348,28 @@ export function createExecutor(deps: ExecutorDeps): Executor {
   }
 
   async function dispatch(action: SpineAction): Promise<ActionResult> {
+    // Engine adaptation B — checked BEFORE `busy` and before touching the
+    // ledger's action budget at all: once ended, every further dispatch is
+    // refused, unconditionally and for free (no budget consumed for a call
+    // that can never do anything). This is a REAL behavior change, not a
+    // no-op for the REPL: spine/session.ts's tool handlers call
+    // executor.dispatch() straight from the model's tool-call turn, entirely
+    // independent of spine/repl.ts's `while (!executor.isEnded())` prompt
+    // loop — that loop only gates when the REPL stops asking the HUMAN for
+    // another line; it does nothing to stop the MODEL from calling a second
+    // tool in the same (or a following) turn before the human ever gets a
+    // chance to notice isEnded() and call session.end(). Before this
+    // adaptation, such a same-turn extra tool call would have EXECUTED; now
+    // it is refused with `session_ended` — for BOTH the REPL and spined.
+    // spined additionally has no REPL loop at all, so this is its only
+    // enforcement point either way.
+    if (ended) {
+      return {
+        ok: false,
+        code: "session_ended",
+        error: `session already ended (${ended.kind}): ${ended.message}`,
+      };
+    }
     if (busy) {
       return { ok: false, code: "busy", error: "the spine is already executing an action — wait for it to finish" };
     }

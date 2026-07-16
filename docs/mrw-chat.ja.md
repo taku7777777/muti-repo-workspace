@@ -79,9 +79,11 @@ Agent SDK + typed schema + 固定 read-only 姿勢のまま。Claude Code に乗
     （dispatch されるアクションは設計上すべて budget を消費する —
     「いつでも呼べる」status が budget を溶かしてはならない）。
   - **チケットごと単一インスタンス**: spined は ledger dir に排他 lockfile を
-    取る; 同一チケットへの 2 個目のデーモン（2 枚目のチャットタブ、または
-    chat + 旧 REPL）は明確なメッセージで fail-closed。これがないと executor
-    が 2 つになり budget レールが倍増し、ledger は last-writer-wins で壊れる。
+    取る; 同一チケットへの 2 個目のデーモン（2 枚目のチャットタブ）は明確な
+    メッセージで fail-closed。これがないと executor が 2 つになり budget
+    レールが倍増し、ledger は last-writer-wins で壊れる。**旧 REPL はまだ
+    このロックを取らない** — chat + REPL の同時起動は REPL がロックを採用する
+    まで未強制（C4 で追跡）。
   - **keep-alive 進捗**: 長い dispatch（`run_worker`、分単位）の間、デーモンが
     タイマーから粗い MCP progress notification を発する
     （「run_worker … Ns elapsed」、~10 秒間隔）。C1 で TUI にライブ描画される
@@ -219,7 +221,9 @@ executor/ledger/steps/workerd は不変:
   budget 免除; broker caveat 行の unit test。
 - **C3 — フロントエンド構成 + 配線。** 受け入れ基準: render 先ガードが
   `tasks/` セグメントを拒否; trust スタンプ自動化; `enabledMcpjsonServers`
-  あり; CLI の固定 install はエラー時にビルドを落とす; MCP タイムアウトを
+  あり; `.mcp.json` は `tsx src/spined/index.ts` を**直接** spawn
+  （`npm run` ラッパは自身のバナーを stdout に出し、spined の stdio guard が
+  効く前に JSON-RPC ワイヤを壊す）; CLI の固定 install はエラー時にビルドを落とす; MCP タイムアウトを
   worker budget より上に固定; 実セッションで keep-alive 進捗が見える;
   スタック停止時に launcher が拒否（コンテナ専用）; `chat-home` volume;
   selfcheck 拡張（deny 姿勢 + `claudeMdExcludes` 挙動 +

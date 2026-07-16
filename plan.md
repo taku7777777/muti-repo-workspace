@@ -94,8 +94,8 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
     spine-prepare + atomic rename ロック + keep-alive 進捗 + budget 免除 status +
     stdio guard）+ エンジン適応（approval policy / session_ended / ledger
     versioned load）。独立レビュー SHIP-WITH-FIXES → 全件反映、166/166 tests。
-    **broker caveat スライスは未コミット**（handler.ts が Thread B の未コミット
-    作業と交差 — Thread B の land 後にコミット）。
+    broker caveat スライス（broker 算出 caveat + renderHeader テスト、43/43）は
+    Thread B land 後に続けてコミット済み。
   - C3: フロントエンド構成生成 + `mrw chat`/task-up/cmux 配線 + CLI バージョン固定
   - C4: 不変条件チェック + 独立レビュー + ライブ E2E
 - **feat/mrw pre-merge blockers（2026-07-16 独立レビュー）** — push-guard config の

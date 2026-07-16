@@ -18,10 +18,14 @@
  *      failure (feature off, unreachable, timeout, malformed reply) yields a null
  *      verdict and NEVER throws; it cannot block or fail a publish, only annotate
  *      the human gate below;
+ *   7.6. Thread C / Phase C2: compute the test-independence caveat (caveat.ts)
+ *      on that SAME ground-truth diff — a pure, synchronous, never-throwing
+ *      function, unlike 7.5's outbound call. Advisory only, same as 7.5;
  *   8. HUMAN approves at the broker OR IN A BROWSER (Thread B), seeing the resolved
- *      target + sha AND the reviewer's verdict, if any — ApprovalHub.decide()
- *      races the TTY prompt against socket decisions from `mrw serve`; first
- *      wins (cancellable, same as before Thread B existed);
+ *      target + sha, the reviewer's verdict if any, AND the test-independence
+ *      caveat if any — ApprovalHub.decide() races the TTY prompt against socket
+ *      decisions from `mrw serve`; first wins (cancellable, same as before
+ *      Thread B existed);
  *   9. F6: re-scan config, re-resolve+re-validate the target, re-confirm the sha —
  *      all IN-PROCESS, synchronously, immediately before push; any mismatch aborts;
  *  10. push the EXACT approved sha to the constructed URL from the scratch repo,
@@ -33,6 +37,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { GITHUB_TOKEN, WORKTREES_ROOT, loadPolicy, ticketFromWorktreesRoot } from "./config.js";
 import type { Policy } from "./config.js";
+import { diffTouchesTests } from "./caveat.js";
 import { ApprovalHub } from "./gate.js";
 import { maybeConsultReviewer } from "./reviewer.js";
 import {
@@ -188,6 +193,12 @@ export async function handleRequest(raw: unknown, signal?: AbortSignal): Promise
     // returns null; this call NEVER throws into the publish path.
     const reviewerVerdict = await maybeConsultReviewer(render.diff, req.title, req.body, signal);
 
+    // Thread C / Phase C2 (docs/mrw-chat.md "Gate policy" #4): computed on
+    // the SAME ground-truth diff the human is about to see — never the
+    // coder's words — so it cannot be spoofed or omitted by a malicious
+    // coder. Advisory only, rendered next to the reviewer line (approve.ts).
+    const testCaveat = diffTouchesTests(render.diff);
+
     // 8. Human gate (cancellable): ApprovalHub.decide() races the TTY prompt
     //    against a browser decision (Thread B); first wins. No await between
     //    a resolved decision and the push except the ones below (F6/10).
@@ -209,6 +220,7 @@ export async function handleRequest(raw: unknown, signal?: AbortSignal): Promise
           diffStat: render.diffStat,
           diff: render.diff,
           reviewerVerdict,
+          testCaveat,
           shortSha: shaBefore.slice(0, 12),
           ticket: ticketFromWorktreesRoot(),
         },

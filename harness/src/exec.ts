@@ -39,17 +39,43 @@ export interface SetupOutcome {
  * single-repo CLI) cannot be split-mode'd, and we fail loudly rather than
  * silently guess.
  */
-function deriveTicketRepo(repoDir: string): { ticket: string; repo: string } {
+const BARE_TICKET = /^[A-Za-z0-9._-]{1,100}$/;
+const BARE_REPO = /^[A-Za-z0-9._-]{1,200}$/;
+
+/** Return the ticket encoded by the canonical per-ticket worktree layout. */
+export function ticketFromRepoDirLayout(repoDir: string): string | null {
   const root = resolveWorkspaceRoot();
   const rel = path.relative(root, path.resolve(repoDir));
   const parts = rel.split(path.sep);
-  if (parts.length !== 4 || parts[0] !== "tasks" || parts[2] !== "repositories") {
+  if (
+    parts.length !== 4 ||
+    parts[0] !== "tasks" ||
+    parts[2] !== "repositories" ||
+    !BARE_TICKET.test(parts[1]) ||
+    parts[1] === "." ||
+    parts[1] === ".." ||
+    parts[1].includes("..") ||
+    !BARE_REPO.test(parts[3]) ||
+    parts[3] === "." ||
+    parts[3] === ".." ||
+    parts[3].includes("..")
+  ) {
+    return null;
+  }
+  return parts[1];
+}
+
+function deriveTicketRepo(repoDir: string): { ticket: string; repo: string } {
+  const ticket = ticketFromRepoDirLayout(repoDir);
+  if (ticket === null) {
+    const root = resolveWorkspaceRoot();
+    const rel = path.relative(root, path.resolve(repoDir));
     throw new Error(
       `split mode (WORKERD_SOCKET set) requires worktrees under tasks/<ticket>/repositories/<repo> ` +
         `— got '${repoDir}' (relative to workspace root: '${rel}')`,
     );
   }
-  return { ticket: parts[1], repo: parts[3] };
+  return { ticket, repo: path.basename(path.resolve(repoDir)) };
 }
 
 /** Create (or reuse) a repo's worktree and record its base sha, via the

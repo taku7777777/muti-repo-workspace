@@ -12,6 +12,9 @@
 /tasks/*
 !/tasks/.gitkeep
 
+# Host-owned broker routing registry (one generated entry per open ticket).
+/broker-tickets/
+
 # Thread C chat frontend (docs/mrw-chat.md): rendered `mrw chat` configs
 # (.claude/settings.json / CLAUDE.md / .mcp.json), one per ticket. Generated
 # by scripts/chat-up.sh into STATE_ROOT/chat/<ticket>/ — this is the

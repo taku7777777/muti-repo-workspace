@@ -42,6 +42,9 @@ fi
 # legacy — chat/ there is covered by the tracked chat/.gitkeep (.gitignore),
 # same as tasks/repositories's own .gitkeep files.
 _state_root="$(state_root)"
+_ticket_registry="$(canonicalize_path "$_state_root/broker-tickets")"
+reject_tasks_path "$_ticket_registry"
+mkdir -p "$_ticket_registry"
 if [ "$_state_root" != "$(workspace_root)" ]; then
   export MRW_STATE_ROOT="$_state_root"
   # chat/ (docs/mrw-chat.md Phase C3, scripts/chat-up.sh's render target)

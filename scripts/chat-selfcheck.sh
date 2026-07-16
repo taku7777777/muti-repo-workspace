@@ -26,6 +26,8 @@
 #                               deny-vs-prompt-refused trap as probe 1).
 #   4. deny posture (subagent): same shape as probe 1, for Task/Agent
 #                               (subagent-launching) tools.
+#   5. routed publish contract: an unregistered ticket must be rejected with
+#                               ticket_not_registered (and not invalid_request).
 #
 # DENY-REMOVED vs PROMPT-REFUSED (probes 1 and 4): asking the model to
 # ABSTRACTLY self-report "is tool X in your list" is UNRELIABLE — empirically
@@ -171,7 +173,7 @@ tool_attempt_shows_deny_removed() {
 }
 
 echo ""
-echo "[chat-selfcheck] 1/4 — deny posture (Bash): must be DENY-REMOVED, not merely prompt-refused"
+echo "[chat-selfcheck] 1/5 — deny posture (Bash): must be DENY-REMOVED, not merely prompt-refused"
 MARKER="/tmp/mrw-chat-selfcheck-bash-marker-$$"
 dc exec -T orchestrator rm -f "$MARKER" >/dev/null 2>&1 || true
 bash_raw="$(run_claude_p_raw "Use the Bash tool to run: touch $MARKER . Then tell me whether you succeeded.")"
@@ -191,7 +193,7 @@ else
 fi
 
 echo ""
-echo "[chat-selfcheck] 2/4 — mcp__spine__status must succeed (no MCP approval prompt)"
+echo "[chat-selfcheck] 2/5 — mcp__spine__status must succeed (no MCP approval prompt)"
 status_reply="$(run_claude_p "Call the status tool (mcp__spine__status) and reply with ONLY the raw JSON it returned, nothing else.")"
 if printf '%s' "$status_reply" | grep -q '"ok":[[:space:]]*true' 2>/dev/null \
   || printf '%s' "$status_reply" | grep -qi '"ticket"' 2>/dev/null; then
@@ -201,7 +203,7 @@ else
 fi
 
 echo ""
-echo "[chat-selfcheck] 3/4 — claudeMdExcludes must suppress a planted nested CLAUDE.md"
+echo "[chat-selfcheck] 3/5 — claudeMdExcludes must suppress a planted nested CLAUDE.md"
 if [ -z "$REPO1" ]; then
   bad "no repo in $CONFIG_DIR/repos.json to plant a nested CLAUDE.md under — cannot run this check"
 else
@@ -253,13 +255,45 @@ else
 fi
 
 echo ""
-echo "[chat-selfcheck] 4/4 — deny posture (subagent/Task+Agent): must be DENY-REMOVED"
+echo "[chat-selfcheck] 4/5 — deny posture (subagent/Task+Agent): must be DENY-REMOVED"
 subagent_raw="$(run_claude_p_raw "Launch a subagent (using whichever tool you have for launching a subagent or sub-task — e.g. one named 'Task' or 'Agent') to do something trivial: have it reply with the word DONE.")"
 if tool_attempt_shows_deny_removed "$subagent_raw"; then
   pass "subagent-launching tools (Task/Agent) are deny-removed from the session's tool set (empty permission_denials — no tool_use was ever attempted)"
 else
   subagent_reply="$(printf '%s' "$subagent_raw" | jq -r '.result // empty' 2>/dev/null)"
   bad "a subagent-launching tool appears present but merely prompt-refused (non-empty permission_denials), not deny-removed — model reply: '$subagent_reply'"
+fi
+
+echo ""
+echo "[chat-selfcheck] 5/5 — routed publish rejects an unregistered ticket"
+probe_ticket="CHATSELFCHECK-UNREGISTERED-$$"
+probe_response="$(dc exec -T orchestrator node -e '
+const net = require("node:net");
+const req = {
+  repo: "selfcheck-probe",
+  branch: "feat/" + process.argv[1],
+  title: "ticket routing selfcheck",
+  body: "ticket routing selfcheck",
+  ticket: process.argv[1],
+};
+const socket = net.createConnection({ path: process.env.BROKER_SOCKET });
+let buf = "";
+socket.setEncoding("utf8");
+socket.on("connect", () => socket.write(JSON.stringify(req) + "\n"));
+socket.on("data", chunk => {
+  buf += chunk;
+  const newline = buf.indexOf("\n");
+  if (newline >= 0) { process.stdout.write(buf.slice(0, newline)); socket.end(); }
+});
+socket.on("error", err => { console.error(err.message); process.exitCode = 2; });
+' "$probe_ticket" 2>&1)"
+probe_code="$(printf '%s' "$probe_response" | jq -r '.code // empty' 2>/dev/null)"
+if [ "$probe_code" = "ticket_not_registered" ]; then
+  pass "broker routed-publish contract rejects an unregistered ticket before worktree lookup"
+elif [ "$probe_code" = "invalid_request" ]; then
+  bad "broker image predates ticket routing — run 'mrw infra-up --build' (or 'docker compose build broker'); response: $probe_response"
+else
+  bad "routed-publish probe expected code=ticket_not_registered, got '$probe_code'; response: $probe_response"
 fi
 
 echo ""

@@ -29,6 +29,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib/effects/cmux.sh"
 # shellcheck source=lib/effects/worktree.sh
 . "$SCRIPT_DIR/lib/effects/worktree.sh"
+# shellcheck source=lib/effects/ticket-registry.sh
+. "$SCRIPT_DIR/lib/effects/ticket-registry.sh"
 
 require_cmd git
 require_cmd jq
@@ -271,6 +273,7 @@ phase_finalize() {
       create_worktree "$r" "$TICKET_ID" "$BRANCH" "$PURPOSE"
     done
   fi
+  register_broker_ticket "$TICKET_ID"
 
   # --- task docs -----------------------------------------------------------
   if [ ! -f "$TASK_DIR/docs/task.md" ]; then

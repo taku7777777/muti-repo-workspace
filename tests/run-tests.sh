@@ -7,6 +7,8 @@ TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$TESTS_DIR")"
 # shellcheck source=../scripts/lib/common.sh
 . "$ROOT/scripts/lib/common.sh"
+# shellcheck source=../scripts/lib/effects/ticket-registry.sh
+. "$ROOT/scripts/lib/effects/ticket-registry.sh"
 
 PASS=0
 FAIL=0
@@ -174,6 +176,28 @@ assert_status "validate_ticket_id: rejects lowercase prefix" 1 vti 'abc-1'
 # Newline bypass: the OLD line-based grep accepted this (line 1 matched);
 # validate_ticket_id must reject it.
 assert_status "validate_ticket_id: rejects embedded newline" 1 vti "$(printf 'A-1\n/../../tmp/evil')"
+
+# --- broker ticket registry -------------------------------------------------
+registry_td="$(mktemp -d)"
+mkdir -p "$registry_td/.mrw"
+printf '{"state_root":"%s/state"}\n' "$registry_td" > "$registry_td/.mrw/workspace.json"
+registry_call() ( MRW_CONFIG_DIR="$registry_td/.mrw" "$@" )
+
+assert_status "ticket registry: register creates an entry" 0 registry_call register_broker_ticket REG-1
+registry_entry="$registry_td/state/broker-tickets/REG-1"
+assert_status "ticket registry: entry has the typed JSON content" 0 \
+  jq -e '.ticket == "REG-1" and (.created_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T"))' "$registry_entry"
+assert_status "ticket registry: registration is idempotent" 0 registry_call register_broker_ticket REG-1
+assert_status "ticket registry: deregister removes the entry" 0 registry_call deregister_broker_ticket REG-1
+assert_status "ticket registry: deregistered entry is absent" 1 test -e "$registry_entry"
+rmdir "$registry_td/state/broker-tickets"
+assert_status "ticket registry: deregister tolerates a missing entry and directory" 0 registry_call deregister_broker_ticket REG-1
+
+mkdir -p "$registry_td/real/tasks/state" "$registry_td/tasks-config"
+printf '{"state_root":"%s/real/tasks/state"}\n' "$registry_td" > "$registry_td/tasks-config/workspace.json"
+registry_tasks_call() ( MRW_CONFIG_DIR="$registry_td/tasks-config" register_broker_ticket REG-2 )
+assert_status "ticket registry: refuses a canonicalized tasks path" 1 registry_tasks_call
+rm -rf "$registry_td"
 
 # --- pre-push hook (real subprocess, controlled config) --------------------------
 # Invoke the ACTUAL hook against a temp workspace so a regression in the hook

@@ -14,6 +14,7 @@ import * as net from "node:net";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import type { Plan, Review } from "./types.js";
+import { ticketFromRepoDirLayout } from "./exec.js";
 
 // --- wire contract (kept in sync with broker/src/types.ts) -------------------
 export interface PublishRequest {
@@ -21,6 +22,7 @@ export interface PublishRequest {
   branch: string;
   title: string;
   body: string;
+  ticket?: string;
 }
 
 export type PublishResponse =
@@ -89,7 +91,21 @@ export function buildRequest(ctx: PublishContext, repoDir: string): PublishReque
     gitLine(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"]) ??
     "HEAD";
   const title = firstLine(ctx.plan.summary) || "Automated change";
-  return { repo, branch, title, body: buildBody(ctx.plan, ctx.review) };
+  const request: PublishRequest = { repo, branch, title, body: buildBody(ctx.plan, ctx.review) };
+  const ticket = ticketFromRepoDirLayout(repoDir);
+  if (ticket !== null) request.ticket = ticket;
+  return request;
+}
+
+export function brokerRefusalError(req: PublishRequest, res: Extract<PublishResponse, { ok: false }>): Error {
+  const original = `[publish] broker refused (${res.code}): ${res.error}`;
+  if (req.ticket !== undefined && res.code === "invalid_request") {
+    return new Error(
+      "broker image predates ticket routing — run `mrw infra-up --build` " +
+        `(or \`docker compose build broker\`); ${original}`,
+    );
+  }
+  return new Error(original);
 }
 
 // The broker blocks on an out-of-container human gate whose default budget is 30
@@ -161,7 +177,7 @@ export async function publish(ctx: PublishContext, repoDir: string): Promise<Pub
 
   const res = await sendToBroker(socketPath, req);
   if (!res.ok) {
-    throw new Error(`[publish] broker refused (${res.code}): ${res.error}`);
+    throw brokerRefusalError(req, res);
   }
   console.log(
     `[publish] published ${req.repo}@${res.branch} (${res.sha}). ` +

@@ -51,7 +51,7 @@ COPY broker/src ./src
 #     fallback. The mount point is created here (and left root-owned) so the runtime bind has
 #     somewhere to land; it still lives OUTSIDE the coder-writable
 #     /workspaces mount, so the broker's F2 containment check accepts it. ---
-RUN install -d -m 0755 /etc/mrw-broker/config
+RUN install -d -m 0755 /etc/mrw-broker/config /etc/mrw-broker/tickets
 
 # The `node` user runs the broker and needs to write the tsx cache under /broker.
 # The baked src is then stripped of write bits (read-only even inside the

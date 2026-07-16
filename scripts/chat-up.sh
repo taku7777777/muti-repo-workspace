@@ -35,6 +35,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 export COMPOSE_PROJECT_NAME="$(compose_project_name)"
 # shellcheck source=lib/effects/cmux.sh
 . "$SCRIPT_DIR/lib/effects/cmux.sh"
+# shellcheck source=lib/effects/ticket-registry.sh
+. "$SCRIPT_DIR/lib/effects/ticket-registry.sh"
 
 require_cmd docker
 require_cmd jq
@@ -289,6 +291,7 @@ else
     rm -rf "$CHAT_DIR"
     die "spine-prepare failed — removed the incomplete render at $CHAT_DIR (see the prepare output above for the cause; re-run 'mrw chat $TICKET_ID' once it's fixed — NOT --resume, nothing was prepared)."
   fi
+  register_broker_ticket "$TICKET_ID"
 fi
 
 # ---------------------------------------------------------------------------

@@ -110,10 +110,31 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
     rebuild が必要** — allowlist は COPY 焼き込み）。
     既知の残 UX: chat-home volume 初回のみ CLI onboarding（テーマ/ログイン）
     の人間クリックスルーが必要。
-  - C4: 不変条件チェック + 独立レビュー + ライブ E2E
-- **feat/mrw pre-merge blockers（2026-07-16 独立レビュー）** — ✅ 修正済み
-  （2026-07-17、作業ツリー、コミット前）。push-guard config の canonicalize /
-  triage leaf の tool-less 化 / telemetry 網 internal 検証を完了。
+  - C4: ✅ ライブ E2E 完了（2026-07-17、ETE-1 → phase2-demo#4）— chat →
+    run_worker → tests green → plan → review approve → request_publish →
+    ブラウザ SHA ゲート（caveat バッジ・keep-alive 描画・resume レグ込み）→
+    実 push + PR。E2E でのみ発見できた 2 バグ: (1) `.mcp.json` の未展開
+    `${VAR}` プレースホルダを実クレデンシャルと誤認（FIXED `8c4570f`
+    env-sanitize）、(2) broker の worktree 参照が起動時 env 固定で
+    per-ticket publish 不能 → **broker ticket routing**（下記）として解決。
+    残: 最終独立レビュー + devcontainer-status 記録。
+- **broker per-ticket routing（設計 → R4 ライブ検証まで完了 2026-07-17）** —
+  docs/broker-ticket-routing.md（独立レビュー SHIP-WITH-FIXES 全11件反映
+  `40f4b7f`）。R2 broker 実装 `dedaffd`（53/53）+ R3 送信側/レジストリ/配線
+  `b621372`（harness 173・shell 114）。R4 ライブ: RT-1（phase2-demo#5）+
+  RT-2（phase3-docs#2）を **broker 再作成なしで同一 broker から連続 publish**
+  （多重度 N 実証）; 未登録チケット socket プローブ 5 種; **F6
+  ゲート中登録解除 → 正しい SHA 承認でも fail-closed** を実機確認。
+  `BROKER_GITHUB_TOKEN` の export だけで複数チケット publish 可能に
+  （`BROKER_WORKTREES_DIR` の手動向け替え儀式は不要化・legacy 互換維持）。
+  R4 で判明した残ギャップ（別スライス候補）: workerd はスタック単一・
+  シングルフライトで並行チケットのステップが busy 競合し、**busy 拒否も
+  worker-run 予算を消費**する（RT-2 で 3/12 空費）; `run_tests` は
+  `npm test` 前提で package.json の無い docs リポジトリはゲート不能
+  （per-repo TEST_COMMAND 未対応。RT-2 は no-op test script 追加で回避）。
+- **feat/mrw pre-merge blockers（2026-07-16 独立レビュー）** — ✅ 修正済み・
+  コミット済み（`440da38`、全スイート検証後にランド）。push-guard config の
+  canonicalize / triage leaf の tool-less 化 / telemetry 網 internal 検証を完了。
 - ~~**Thread B（ブラウザ承認 / `mrw serve`）**~~ — ✅ 完了（上の表参照）。残フォローアップ:
   稼働中 broker コンテナは旧イメージのため、次回 `mrw infra-up --build` 後に
   コンテナ内 broker での承認ライブ E2E を 1 回実施（ホスト側シムでは検証済み）。

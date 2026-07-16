@@ -208,6 +208,39 @@ Phase 0 self-check):
    run). Fail-open verified: with the collector STOPPED, a full drive run
    completed normally with zero OTLP error lines in its output.
 
+11. Thread C chat frontend live E2E (C4) + broker per-ticket routing —
+   **BUILT + LIVE-VALIDATED 2026-07-17**. The C4 human-in-the-loop run
+   (ticket ETE-1) drove the full chat surface end-to-end for the first
+   time: interactive Claude Code → `mcp__spine__*` → worker RPC → tests →
+   plan/review → `request_publish` → `mrw serve` browser SHA gate → real
+   push + phase2-demo#4 (keep-alive progress rendering, `--resume` leg,
+   and the broker-computed tests-touched caveat all observed live). Two
+   defects only a live E2E could surface, both fixed same-day:
+   (a) Claude Code's `.mcp.json` `${VAR}` interpolation leaves the LITERAL
+   placeholder when the var is unset, and the bundled CLI's auth resolver
+   prefers a truthy-garbage `ANTHROPIC_API_KEY` over a valid OAuth token —
+   every spined plan/review failed "Invalid API key" while chat and
+   worker-RPC paths worked. Fix: `harness/src/spined/env-sanitize.ts`
+   deletes self-referential `${NAME}` values at both spined entry points
+   (unit-tested; the four chat-selfcheck probes never exercise plan/review,
+   which is why this survived them). (b) The broker's worktree reference
+   (`BROKER_WORKTREES_DIR`) was a start-time env pin — multiplicity 1,
+   manual, and every historical publish had silently relied on the
+   operator pointing it at the right ticket before `up`. Fixed as
+   request-carried ticket routing + an operator-registered ticket registry
+   (docs/broker-ticket-routing.md — design reviewed SHIP-WITH-FIXES, all
+   11 findings incorporated; R2 `dedaffd`, R3 `b621372`). R4 live run:
+   RT-1 (phase2-demo#5) and RT-2 (phase3-docs#2) published through the
+   SAME broker with no recreate; five negative socket probes; and the F6
+   leg — deregistering RT-1 while its gate sat open made a CORRECT-sha
+   approval fail closed ("no longer registered; aborting", nothing
+   pushed). Follow-ups recorded (not blockers): workerd is stack-single/
+   single-flight so concurrent tickets contend (`workerd busy`) and busy
+   REFUSALS consume worker-run budget (RT-2 burned 3/12 on retries);
+   `run_tests` assumes `npm test` so a docs repo without package.json
+   cannot pass the gate (RT-2 worked around with a committed no-op test
+   script; per-repo TEST_COMMAND is future work).
+
 M1 first-boot friction found and fixed (all live, none static):
 - A named volume layered over the `:ro` harness bind initializes from the
   HOST's `node_modules` (darwin binaries, host-uid ownership) → `npm ci`

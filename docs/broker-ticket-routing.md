@@ -1,6 +1,21 @@
 # Broker per-ticket routing — request-carried ticket + operator registry (design memo)
 
-**Status: DESIGN — direction agreed with the operator 2026-07-17. Not built.**
+**Status: BUILT + LIVE-VALIDATED 2026-07-17.** R2 (broker) = `dedaffd`,
+R3 (senders/registry/wiring) = `b621372`. R4 live run: tickets RT-1
+(phase2-demo#5) and RT-2 (phase3-docs#2) published through the SAME broker
+with no recreate between them — the operator exported only
+`BROKER_GITHUB_TOKEN`; no `BROKER_WORKTREES_DIR` ritual. Both approval
+surfaces showed the ticket badge; the tests-touched caveat fired on both
+(package.json rule). Negative legs: five socket probes (unregistered /
+registered+missing-repo ordering / case-alias / legacy hint /
+post-deregistration), and the F6 leg — RT-1 deregistered while its gate sat
+open, then approved with the CORRECT sha → `push/PR failed: ticket 'RT-1'
+is no longer registered; aborting`, nothing pushed; re-registered →
+re-requested → published. Known follow-ups found during R4 (out of this
+memo's scope): workerd is stack-single and single-flight, so concurrent
+tickets' steps contend (`workerd busy`) AND busy refusals consume worker-run
+budget; `run_tests` assumes `npm test`, so a docs repo without package.json
+cannot pass the gate (no per-repo TEST_COMMAND yet).
 Companion: docs/mrw-chat.md (Thread C), docs/devcontainer-phase2.md (broker
 contract), docs/browser-approval.md (Thread B). Found during the C4 live E2E
 (ticket ETE-1 → phase2-demo#4).

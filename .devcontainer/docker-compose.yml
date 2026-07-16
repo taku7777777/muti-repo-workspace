@@ -235,6 +235,32 @@ services:
       # see prepare-harness-run.sh), so its module-path-based workspace-root
       # resolution must be pinned back to the real (:ro) mount explicitly.
       MRW_WORKSPACE_ROOT: /workspaces/muti-repo-workspace
+      # Thread C chat frontend (docs/mrw-chat.md): CLAUDE_CONFIG_DIR for the
+      # generated chat session — a named volume (chat-home, see volumes: below)
+      # rather than the default ~/.claude, so conversation history and the
+      # directory-trust stamp survive container recreation. scripts/chat-up.sh
+      # passes this same path explicitly via `-e CLAUDE_CONFIG_DIR=...` on its
+      # own `docker compose exec` calls rather than reading this var back —
+      # it is set here so the value is discoverable/inspectable on the
+      # container itself (`docker compose exec orchestrator env`) without
+      # depending on the host script's own constant staying in sync by
+      # convention alone.
+      MRW_CHAT_HOME: /var/mrw/chat-home
+      # Thread C: forwarded so the container-side spine/steps (harness/src/
+      # sdk.ts's MODEL = HARNESS_MODEL ?? "sonnet") pick the SAME model an
+      # operator's scripts/chat-up.sh render already read from their host
+      # shell — without this, an operator-set HARNESS_MODEL would change
+      # what the rendered settings.json's "model" SAYS without changing what
+      # the in-container run_worker/plan_repo/review_diff steps actually USE,
+      # silently breaking "same source of truth, no manual lockstep" (see
+      # docs/mrw-chat.md's posture-parity table). Null-value passthrough —
+      # same contract as CLAUDE_CODE_OAUTH_TOKEN/ANTHROPIC_API_KEY below:
+      # unset on the host is OMITTED from the container, so the unset case
+      # (the common one) is byte-identical to before this line existed. Bare
+      # `KEY:` (no value, NOT `${KEY:-}`) is Compose's actual null-passthrough
+      # form — `${KEY:-}` would instead always set an empty string, which is
+      # a DIFFERENT (present-but-empty) container env, not "omitted".
+      HARNESS_MODEL:
       # There is no guarantee postCreate.sh ran (exec-attach flow), so npm gets
       # its proxy config via env here too.
       npm_config_proxy: http://egress-proxy:3128
@@ -256,8 +282,23 @@ services:
       # behavior is byte-identical to before this existed.
       - ${MRW_STATE_ROOT:-..}/tasks:/workspaces/muti-repo-workspace/tasks:ro
       - ${MRW_STATE_ROOT:-..}/repositories:/workspaces/muti-repo-workspace/repositories:ro
+      # Thread C chat frontend (docs/mrw-chat.md): the SAME nested-overlay
+      # pattern as tasks/repositories above — STATE_ROOT/chat/<ticket> (the
+      # RENDER TARGET scripts/chat-up.sh writes settings.json/.mcp.json/
+      # CLAUDE.md into) reaches the container here. :ro — the launcher is the
+      # ONLY writer; a compromised worker (which never gets this mount at
+      # all, see the worker service above) must not be able to reach it
+      # either way. Unset MRW_STATE_ROOT ⇒ ../chat, already covered by the
+      # `..` mount above (state_root == workspace_root default case) — same
+      # harmless-overlay reasoning as the tasks/repositories lines.
+      - ${MRW_STATE_ROOT:-..}/chat:/workspaces/muti-repo-workspace/chat:ro
       # The spine's rw notes/ledger volume (see MRW_STATE_DIR above).
       - spine-notes:/var/mrw/notes
+      # Thread C: persistent Claude Code config dir for the generated chat
+      # session (see MRW_CHAT_HOME above) — a named volume so conversation
+      # history and the directory-trust stamp survive container recreation,
+      # the same reasoning as spine-notes above.
+      - chat-home:/var/mrw/chat-home
       # The ONLY service besides `broker` itself that holds this socket.
       - broker-sock:/run/broker
       # Shared with the worker — the RPC transport for implement/fix/test.
@@ -703,6 +744,11 @@ volumes:
   # The spine's rw ledger/notes state (MRW_STATE_DIR) — deliberately off the
   # worker-writable tasks/ tree so it cannot be tampered from that cage.
   spine-notes:
+  # Thread C chat frontend (docs/mrw-chat.md): CLAUDE_CONFIG_DIR for the
+  # generated chat session (MRW_CHAT_HOME above) — persists conversation
+  # history and the directory-trust stamp across container recreation.
+  # Orchestrator-only, same reasoning as spine-notes.
+  chat-home:
   # M3: shared unix-socket carrier between the broker (client) and the
   # reviewer (listener) — same named-volume-vs-host-bind reasoning as
   # broker-sock/worker-sock above.

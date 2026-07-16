@@ -24,11 +24,26 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends gh \
  && rm -rf /var/lib/apt/lists/*
 
-# --- Claude Code CLI (optional for the SDK pipeline; handy for interactive use).
-# The SDK's query() also spawns this bundled CLI under the hood. Pinning the
-# updater OFF keeps a locked build from reaching a not-yet-allowlisted host.
+# --- Claude Code CLI. The SDK's query() also spawns this bundled CLI under
+# the hood; Thread C's chat frontend (docs/mrw-chat.md) runs it directly and
+# interactively inside the orchestrator container. Pinning the updater OFF
+# keeps a locked build from reaching a not-yet-allowlisted host.
+#
+# VERSION PINNED (docs/mrw-chat.md "Drift countermeasures" #1): the chat
+# frontend's whole posture is a settings.json DENYLIST (permissions.deny),
+# the inverse of every other session in this repo (an ALLOWLIST via
+# `tools`/`disallowedTools` — see harness/src/sdk.ts). A denylist is only as
+# safe as the CLI's own built-in tool surface staying the set this was
+# verified against (C1 spike, 2026-07-16, this exact version) — an
+# auto-upgraded CLI could add a new built-in effect tool this deny list does
+# not yet name. Bump deliberately, re-run the C3 selfcheck
+# (scripts/chat-selfcheck.sh) after bumping.
+#
+# `|| true` REMOVED deliberately: a failed install must fail the BUILD, not
+# silently ship an image with no `claude` binary at all (independent review
+# finding — see docs/mrw-chat.md "Drift countermeasures" #1).
 ENV DISABLE_AUTOUPDATER=1
-RUN npm install -g @anthropic-ai/claude-code || true
+RUN npm install -g @anthropic-ai/claude-code@2.1.211
 
 # Harness npm dependencies are installed in postCreate (registry.npmjs.org is
 # allowlisted), because the repo — including harness/ — is bind-mounted at
@@ -41,6 +56,8 @@ RUN npm install -g @anthropic-ai/claude-code || true
 # would get EACCES and the service would exit(1). Pre-creating both node-owned
 # makes the fresh volumes node-owned (same EACCES lesson as broker.Dockerfile's
 # /run/broker; one RUN covers both services since they share this image).
-RUN install -d -o node -g node -m 0755 /run/worker /var/mrw/notes
+# /var/mrw/chat-home is the same lesson for Thread C's chat-home volume
+# (CLAUDE_CONFIG_DIR, orchestrator-only — see docker-compose.yml).
+RUN install -d -o node -g node -m 0755 /run/worker /var/mrw/notes /var/mrw/chat-home
 
 USER node

@@ -96,7 +96,20 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
     versioned load）。独立レビュー SHIP-WITH-FIXES → 全件反映、166/166 tests。
     broker caveat スライス（broker 算出 caveat + renderHeader テスト、43/43）は
     Thread B land 後に続けてコミット済み。
-  - C3: フロントエンド構成生成 + `mrw chat`/task-up/cmux 配線 + CLI バージョン固定
+  - C3: ✅ 完了 — templates/chat-frontend（deny 姿勢 + additionalDirectories +
+    enabledMcpjsonServers + MCP timeout 派生）、`mrw chat` launcher
+    （canonicalize 済み `tasks/` セグメント拒否ガード / spine-prepare /
+    2 キー trust スタンプ / cmux / --resume）、compose chat-home volume
+    （CLAUDE_CONFIG_DIR）、claude@2.1.211 固定（`|| true` 撤去）、
+    chat-selfcheck（4 プローブ、ground-truth 判定）。独立レビュー **REWORK**
+    （settings.json レンダー先誤り = 姿勢不発の BLOCKER 等 13 件）→ 全件修正 +
+    **ライブ再検証**（deny でツール消滅 / MCP 承認プロンプトなし /
+    selfcheck 4/4 / egress 開通 / model 一致）。shell 66 + harness 166 +
+    broker 43 全緑。egress allowlist に platform.claude.com 追加
+    （オペレーター承認済・squid ログ証拠付き。**egress-proxy はイメージ
+    rebuild が必要** — allowlist は COPY 焼き込み）。
+    既知の残 UX: chat-home volume 初回のみ CLI onboarding（テーマ/ログイン）
+    の人間クリックスルーが必要。
   - C4: 不変条件チェック + 独立レビュー + ライブ E2E
 - **feat/mrw pre-merge blockers（2026-07-16 独立レビュー）** — push-guard config の
   canonicalize / triage leaf の姿勢修正 / telemetry 網 internal 検証。Thread C とは

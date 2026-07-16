@@ -152,6 +152,167 @@ git -C "$wt_origin" worktree remove --force \
   "$ROOT/tasks/$wt_ticket/repositories/fixture-repo" >/dev/null 2>&1
 rm -rf "$ROOT/tasks/$wt_ticket" "$wt_origin"
 
+# --- chat-frontend template rendering (mrw-chat.md Phase C3) -----------------
+# Every placeholder render_template now supports for templates/chat-frontend/
+# must be resolved by the time settings.json/.mcp.json actually run inside
+# the container — no residual {{...}} left in the output. Run in the CURRENT
+# shell (not a `( )` subshell): assert_* mutate PASS/FAIL by simple
+# arithmetic, which would not propagate back out of a subshell.
+export WORKSPACE_ROOT="$ROOT" STATE_ROOT="$ROOT" TICKET_ID="T-1" PURPOSE="dev" BRANCH="feat/T-1"
+export MODEL="sonnet" WORK_TYPE="feature" REPOS_CSV="repoa,repob"
+export REPOS_BLOCK='`repoa` (worktree: /workspaces/muti-repo-workspace/tasks/T-1/repositories/repoa); `repob` (worktree: /workspaces/muti-repo-workspace/tasks/T-1/repositories/repob)'
+export CLAUDE_MD_EXCLUDES_JSON='"/workspaces/muti-repo-workspace/tasks/T-1/repositories/repoa", "/workspaces/muti-repo-workspace/tasks/T-1/repositories/repob"'
+export HARNESS_RUN_DIR="/home/node/harness-run"
+export CONTAINER_WORKSPACE_ROOT="/workspaces/muti-repo-workspace"
+export SPINE_STATE_DIR="/var/mrw/notes"
+export MCP_TOOL_TIMEOUT_MS="3600000"
+
+for f in settings.json CLAUDE.md .mcp.json; do
+  out="$(render_template "$ROOT/templates/chat-frontend/$f")"
+  residual="$(printf '%s' "$out" | grep -oE '\{\{[A-Za-z_]+\}\}' | sort -u | tr '\n' ' ')"
+  assert_eq "chat-frontend $f: no unrendered placeholders" "" "$residual"
+done
+
+settings_out="$(render_template "$ROOT/templates/chat-frontend/settings.json")"
+assert_status "chat-frontend settings.json: renders valid JSON" 0 \
+  bash -c 'printf "%s" "$1" | jq empty' _ "$settings_out"
+mcp_out="$(render_template "$ROOT/templates/chat-frontend/.mcp.json")"
+assert_status "chat-frontend .mcp.json: renders valid JSON" 0 \
+  bash -c 'printf "%s" "$1" | jq empty' _ "$mcp_out"
+
+assert_match "chat-frontend settings.json: denies Bash" '"Bash"' "$settings_out"
+assert_match "chat-frontend settings.json: denies Task" '"Task"' "$settings_out"
+assert_match "chat-frontend settings.json: denies Agent" '"Agent"' "$settings_out"
+assert_match "chat-frontend settings.json: allows mcp__spine__\*" '"mcp__spine__\*"' "$settings_out"
+assert_match "chat-frontend settings.json: enables the spine MCP server" '"enabledMcpjsonServers": \["spine"\]' "$settings_out"
+assert_match "chat-frontend settings.json: grants additionalDirectories for repo-orientation Reads" \
+  '"additionalDirectories": \["/workspaces/muti-repo-workspace"\]' "$settings_out"
+assert_match "chat-frontend .mcp.json: spawns tsx directly (not npm run)" '\.bin/tsx' "$mcp_out"
+
+# Clear the chat-frontend env vars so they don't leak into anything below.
+unset WORKSPACE_ROOT STATE_ROOT TICKET_ID PURPOSE BRANCH MODEL WORK_TYPE
+unset REPOS_CSV REPOS_BLOCK CLAUDE_MD_EXCLUDES_JSON HARNESS_RUN_DIR CONTAINER_WORKSPACE_ROOT SPINE_STATE_DIR MCP_TOOL_TIMEOUT_MS
+
+# --- shared fake `docker` shim for every chat-up.sh subprocess test below ----
+# chat-up.sh's very first lines are `require_cmd docker; require_cmd jq` — on
+# a docker-less host (or CI) that dies BEFORE reaching any of the guard/
+# dispatch logic these tests actually exercise, which would make the tests
+# pass or fail for the WRONG reason. A tiny always-"nothing running" shim
+# (same "empty output = down" contract chat-up.sh itself checks for) makes
+# every test below deterministic regardless of what's really on this host —
+# same "fake a real subprocess via a controlled PATH" style as the pre-push
+# hook test above, just reused for every case here instead of one.
+chat_fakebin="$(mktemp -d)"
+cat > "$chat_fakebin/docker" <<'FAKE_DOCKER'
+#!/usr/bin/env bash
+# Fake docker: `compose ... ps --status running -q orchestrator` always
+# reports "nothing running" (empty stdout, exit 0); every other invocation
+# shape also just exits 0 with no output (harmless no-op).
+exit 0
+FAKE_DOCKER
+chmod +x "$chat_fakebin/docker"
+chat_up_with_fake_docker() { # <MRW_CONFIG_DIR> <chat-up.sh args...>
+  local cfgdir="$1"; shift
+  PATH="$chat_fakebin:$PATH" MRW_CONFIG_DIR="$cfgdir" bash "$ROOT/scripts/chat-up.sh" "$@" 2>&1
+}
+# Exported: some call sites below invoke this from inside `bash -c "..."`
+# (assert_status's "run a fresh subprocess and check its exit code" shape) —
+# a NESTED bash only sees a shell FUNCTION if it was exported first, and
+# (bash has no closures) only sees the VARIABLES the function body
+# references — $chat_fakebin, $ROOT — if THOSE are exported too.
+export ROOT chat_fakebin
+export -f chat_up_with_fake_docker
+
+# --- chat-up.sh: render-target tasks/-segment refusal (mrw-chat.md C3) -------
+# Same guard class as `mrw init` — STATE_ROOT/chat/<ticket> must never resolve
+# under a worker-writable `tasks/` path segment. Exercised as a real
+# subprocess (not by sourcing chat-up.sh, which runs its whole flow at the
+# top level) against a throwaway per-workspace config, several path shapes —
+# including a SYMLINKED state_root, which must be resolved (canonicalized)
+# before the guard's string match, not matched against literally.
+chat_guard_td="$(mktemp -d)"
+mkdir -p "$chat_guard_td/.mrw"
+chat_guard_ws_config() { # <state_root>
+  printf '{"state_root": "%s"}\n' "$1" > "$chat_guard_td/.mrw/workspace.json"
+}
+chat_guard_run() {
+  chat_up_with_fake_docker "$chat_guard_td/.mrw" --ticket TST-1
+}
+
+chat_guard_ws_config "$chat_guard_td/state/tasks"
+out="$(chat_guard_run)"
+assert_status "chat-up.sh: refuses state_root ending in /tasks" 1 \
+  bash -c "chat_up_with_fake_docker '$chat_guard_td/.mrw' --ticket TST-1 >/dev/null 2>&1"
+assert_match "chat-up.sh: refusal names the tasks/ segment (ending in /tasks)" "tasks/' path segment" "$out"
+
+chat_guard_ws_config "$chat_guard_td/state/tasks/nested"
+out="$(chat_guard_run)"
+assert_match "chat-up.sh: refusal names the tasks/ segment (mid-path)" "tasks/' path segment" "$out"
+
+chat_guard_ws_config "$chat_guard_td/tasks"
+out="$(chat_guard_run)"
+assert_match "chat-up.sh: refusal fires when state_root itself is the tasks/ segment" "tasks/' path segment" "$out"
+
+# SYMLINK case: the state_root path itself ("innocuous-name") contains no
+# literal "tasks" substring at all — only resolving the symlink (which
+# canonicalize_existing_prefix's `cd` + `pwd -P` does) reveals it points into
+# a tasks/ tree. Before the canonicalize fix this would have sailed straight
+# past the guard's string match; after it, it must refuse exactly like the
+# direct cases above.
+mkdir -p "$chat_guard_td/real/tasks/nested"
+ln -s "$chat_guard_td/real/tasks/nested" "$chat_guard_td/innocuous-name"
+chat_guard_ws_config "$chat_guard_td/innocuous-name"
+out="$(chat_guard_run)"
+assert_match "chat-up.sh: refuses a SYMLINKED state_root that resolves into tasks/ (canonicalized)" \
+  "tasks/' path segment" "$out"
+
+# Negative control: a substring match ("mytasksdir") must NOT trip the guard
+# — it is not a path segment named exactly "tasks". With docker mocked as
+# "down" (chat_up_with_fake_docker), the run now deterministically proceeds
+# PAST the guard and fails at the stack-down check instead — a stronger
+# assertion than merely "the guard message is absent".
+chat_guard_ws_config "$chat_guard_td/mytasksdir"
+out="$(chat_guard_run)"
+guard_hit="$(printf '%s' "$out" | grep -oE "tasks/' path segment" || true)"
+assert_eq "chat-up.sh: does NOT refuse a substring like 'mytasksdir' (guard is segment-exact)" "" "$guard_hit"
+assert_match "chat-up.sh: 'mytasksdir' proceeds past the guard to the (mocked-down) stack check" \
+  "devcontainer stack is not up" "$out"
+
+rm -rf "$chat_guard_td"
+
+# --- chat-up.sh: fails closed when the devcontainer stack is down ------------
+chat_down_td="$(mktemp -d)"
+mkdir -p "$chat_down_td/.mrw"
+printf '{"state_root": "%s"}\n' "$chat_down_td/state" > "$chat_down_td/.mrw/workspace.json"
+
+assert_status "chat-up.sh: fails closed (non-zero exit) when the stack is down" 1 \
+  bash -c "chat_up_with_fake_docker '$chat_down_td/.mrw' --ticket TST-1 >/dev/null 2>&1"
+down_out="$(chat_up_with_fake_docker "$chat_down_td/.mrw" --ticket TST-1)"
+assert_match "chat-up.sh: names the stack-down reason and 'mrw infra-up' guidance" \
+  "devcontainer stack is not up.*infra-up" "$down_out"
+
+rm -rf "$chat_down_td"
+
+# --- mrw chat: dispatch wiring (mrw-chat.md C3) -------------------------------
+assert_status "cli/mrw.mjs: no shell:true anywhere (spawnSync must never shell out)" 1 \
+  grep -qE 'shell:[[:space:]]*true' "$ROOT/cli/mrw.mjs"
+assert_status "cli/mrw.mjs: 'chat' dispatches to scripts/chat-up.sh" 0 \
+  grep -q 'runScript("chat-up.sh"' "$ROOT/cli/mrw.mjs"
+
+# require_cmd docker (chat-up.sh's very first check) needs a real binary on
+# PATH even for this "no --ticket" usage-message case — mocked for the same
+# docker-less-host reason as the guard tests above.
+chat_dispatch_out="$(cd "$ROOT" && PATH="$chat_fakebin:$PATH" node "$ROOT/cli/mrw.mjs" chat 2>&1)"
+assert_match "mrw chat (no --ticket): reaches chat-up.sh's own usage message" \
+  "usage: chat-up.sh --ticket" "$chat_dispatch_out"
+assert_status "mrw chat (no --ticket): non-zero exit (propagated from chat-up.sh)" 1 \
+  bash -c "cd '$ROOT' && PATH='$chat_fakebin:$PATH' node '$ROOT/cli/mrw.mjs' chat >/dev/null 2>&1"
+
+assert_status "mrw task-up: prints the 'mrw chat' hint on success (source check)" 0 \
+  grep -q 'Tip: chat with the spine' "$ROOT/cli/mrw.mjs"
+
+rm -rf "$chat_fakebin"
+
 # --- harness/test/*.test.ts (guarded: node:test suite, run ONLY if this ------
 # host's harness/node_modules is actually runnable) --------------------------
 # harness/node_modules is gitignored and populated by whichever environment last

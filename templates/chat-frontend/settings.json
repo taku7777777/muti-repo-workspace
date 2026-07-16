@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+
+  "model": "{{MODEL}}",
+
+  "env": {
+    "OTEL_RESOURCE_ATTRIBUTES": "workspace={{TICKET_ID}},work_type={{WORK_TYPE}},role=spine",
+    "MCP_TIMEOUT": "{{MCP_TOOL_TIMEOUT_MS}}",
+    "MCP_TOOL_TIMEOUT": "{{MCP_TOOL_TIMEOUT_MS}}"
+  },
+
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "mcp__spine__*"
+    ],
+    "deny": [
+      "Bash",
+      "Edit",
+      "Write",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch",
+      "Task",
+      "Agent",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/.config/gcloud/**)",
+      "Read(~/.npmrc)"
+    ],
+    "additionalDirectories": ["{{CONTAINER_WORKSPACE_ROOT}}"]
+  },
+
+  "enabledMcpjsonServers": ["spine"],
+
+  "claudeMdExcludes": [{{CLAUDE_MD_EXCLUDES_JSON}}]
+}

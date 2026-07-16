@@ -160,6 +160,17 @@ validate_ticket_id() {
 # Substitute {{PLACEHOLDER}} tokens from the corresponding environment
 # variables (empty if unset). Output to stdout. Substitution happens at
 # runtime only — templates committed to the repo never contain real paths.
+#
+# The MODEL.../CONTAINER_*/SPINE_STATE_DIR placeholders below were added for
+# templates/chat-frontend/ (mrw-chat.md Phase C3): even though those values
+# are CONTAINER-fixed constants (same string for every ticket, unlike
+# STATE_ROOT/TASK_DIR which vary per host install), they are still rendered
+# through placeholders rather than hardcoded in the template files — the same
+# "templates never contain absolute paths" discipline every other template in
+# this repo already follows (e.g. task-worker/claude-settings.json templates
+# WORKSPACE_ROOT even though, for that agent, it too never actually varies
+# within one render). Adding new placeholders here is additive and safe: a
+# template that doesn't reference a given token is unaffected (sed no-ops).
 render_template() {
   local tpl="$1"
   [ -f "$tpl" ] || die "template not found: $tpl"
@@ -175,6 +186,15 @@ render_template() {
     -e "s|{{TICKET_URL}}|$(sed_escape "${TICKET_URL:-}")|g" \
     -e "s|{{BRANCH}}|$(sed_escape "${BRANCH:-}")|g" \
     -e "s|{{REPOS_LIST}}|$(sed_escape "${REPOS_LIST:-}")|g" \
+    -e "s|{{MODEL}}|$(sed_escape "${MODEL:-}")|g" \
+    -e "s|{{WORK_TYPE}}|$(sed_escape "${WORK_TYPE:-}")|g" \
+    -e "s|{{REPOS_CSV}}|$(sed_escape "${REPOS_CSV:-}")|g" \
+    -e "s|{{REPOS_BLOCK}}|$(sed_escape "${REPOS_BLOCK:-}")|g" \
+    -e "s|{{CLAUDE_MD_EXCLUDES_JSON}}|$(sed_escape "${CLAUDE_MD_EXCLUDES_JSON:-}")|g" \
+    -e "s|{{HARNESS_RUN_DIR}}|$(sed_escape "${HARNESS_RUN_DIR:-}")|g" \
+    -e "s|{{CONTAINER_WORKSPACE_ROOT}}|$(sed_escape "${CONTAINER_WORKSPACE_ROOT:-}")|g" \
+    -e "s|{{SPINE_STATE_DIR}}|$(sed_escape "${SPINE_STATE_DIR:-}")|g" \
+    -e "s|{{MCP_TOOL_TIMEOUT_MS}}|$(sed_escape "${MCP_TOOL_TIMEOUT_MS:-}")|g" \
     "$tpl")"
   # Catch typo'd or newly-added-but-unwired placeholders before they ship
   # verbatim into a generated settings/CLAUDE file.

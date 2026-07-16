@@ -137,7 +137,12 @@ function setStateRoot(value) {
 // (which runs with cwd=toolHome, see below — NOT the caller's original cwd)
 // agrees with the configDir this CLI process itself discovered, rather than
 // relying on the script's independent walk-up landing on the same place.
-function runScript(relativeScriptPath, argv, env) {
+// `onSuccess` (optional) runs BEFORE the process exits, only when the child
+// exited 0 — used by cmdTaskUp to print the 'mrw chat' hint after a
+// successful task-up without disturbing any other call site's behavior
+// (every other caller omits it, so handleSpawnResult's default path is
+// byte-identical to before this parameter existed).
+function runScript(relativeScriptPath, argv, env, onSuccess) {
   const scriptPath = path.join(toolHome, "scripts", relativeScriptPath);
   const baseEnv = env || process.env;
   const result = spawnSync(scriptPath, argv, {
@@ -145,7 +150,7 @@ function runScript(relativeScriptPath, argv, env) {
     cwd: toolHome,
     env: { ...baseEnv, MRW_CONFIG_DIR: configDir },
   });
-  handleSpawnResult(result, scriptPath);
+  handleSpawnResult(result, scriptPath, onSuccess);
 }
 
 function runCommand(cmd, argv) {
@@ -157,7 +162,7 @@ function runCommand(cmd, argv) {
   handleSpawnResult(result, cmd);
 }
 
-function handleSpawnResult(result, label) {
+function handleSpawnResult(result, label, onSuccess) {
   if (result.error) {
     console.error(`error: failed to run ${label}: ${result.error.message}`);
     process.exit(1);
@@ -166,7 +171,9 @@ function handleSpawnResult(result, label) {
     console.error(`error: ${label} was killed by signal ${result.signal}`);
     process.exit(1);
   }
-  process.exit(result.status === null ? 1 : result.status);
+  const code = result.status === null ? 1 : result.status;
+  if (code === 0 && onSuccess) onSuccess();
+  process.exit(code);
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +206,14 @@ Subcommands:
   list [args...]                       exec scripts/list-task.sh
   close <TICKET_ID> [--force]          exec scripts/remove-workspace.sh
   doctor [args...]                     exec scripts/verify-workspace.sh
+  chat <TICKET_ID> [opts...]           exec scripts/chat-up.sh — Thread C chat frontend
+    [--repos a,b] [--purpose p]        (docs/mrw-chat.md): renders the generated Claude
+    [--resume] [instruction...]        Code frontend config, runs spine-prepare, and opens
+                                        an interactive session inside the orchestrator
+                                        container. Container-only — refuses if the
+                                        devcontainer stack is not up. --resume reopens the
+                                        same ticket with 'claude --continue' instead of
+                                        re-rendering/re-preparing.
   serve [up|down|url|status]           Thread B browser approval (docs/browser-approval.md)
     [--port N] [--no-open]             default 'up': starts the profile-gated 'serve'
                                         compose service (--no-deps, so a running broker is
@@ -624,6 +639,12 @@ function cmdTaskUp(argvIn) {
   // 3. Determine create-workspace.sh's argv (explicit flags win over
   // defaults; see buildTaskUpArgs).
   const forwardedArgs = buildTaskUpArgs(rest, defaults);
+  // buildTaskUpArgs's return shape is always ["--phase", "all", "--ticket", <id>, ...] —
+  // pull the resolved ticket id back out for the post-success hint below
+  // rather than re-deriving it (ticketId/defaults.ticketId/positionals are
+  // all folded together inside buildTaskUpArgs; this index is the one place
+  // the FINAL resolved value comes back out).
+  const resolvedTicketId = forwardedArgs[3];
 
   // 5. MRW_WORK_TYPE is stamped into create-workspace.sh's own env only —
   // this is a per-run record, NOT per-ticket telemetry wiring (the stack's
@@ -632,7 +653,13 @@ function cmdTaskUp(argvIn) {
   const env = { ...process.env };
   if (triage) env.MRW_WORK_TYPE = triage.work_type;
 
-  runScript("create-workspace.sh", forwardedArgs, env);
+  // docs/mrw-chat.md Phase C3 "Wiring": task-up PRINTS the chat hint — it
+  // never auto-launches (that's an explicit `mrw chat` call, and it's
+  // container-only besides).
+  runScript("create-workspace.sh", forwardedArgs, env, () => {
+    console.log("");
+    console.log(`Tip: chat with the spine for this ticket — mrw chat ${resolvedTicketId}`);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -964,6 +991,10 @@ function main() {
 
     case "doctor":
       runScript("verify-workspace.sh", rest);
+      break;
+
+    case "chat":
+      runScript("chat-up.sh", rest);
       break;
 
     case "serve":

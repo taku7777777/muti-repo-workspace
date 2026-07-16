@@ -36,11 +36,19 @@ if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
 fi
 
 # Point the compose state binds at the configured state_root (repositories/ +
-# tasks/). Unset ⇒ compose falls back to `..` (the tool checkout) = legacy.
+# tasks/ + chat/). Unset ⇒ compose falls back to `..` (the tool checkout) =
+# legacy — chat/ there is covered by the tracked chat/.gitkeep (.gitignore),
+# same as tasks/repositories's own .gitkeep files.
 _state_root="$(state_root)"
 if [ "$_state_root" != "$(workspace_root)" ]; then
   export MRW_STATE_ROOT="$_state_root"
-  mkdir -p "$_state_root/tasks" "$_state_root/repositories"
+  # chat/ (docs/mrw-chat.md Phase C3, scripts/chat-up.sh's render target)
+  # MUST pre-exist here too: an externalized state_root has no tracked
+  # chat/.gitkeep of its own, so without this the nested bind mount's source
+  # would be missing at `docker compose up` time and Docker would auto-create
+  # it itself — root-owned on native Linux hosts, which would then make
+  # chat-up.sh's own (non-root) `mkdir -p "$CHAT_DIR/.claude"` fail EACCES.
+  mkdir -p "$_state_root/tasks" "$_state_root/repositories" "$_state_root/chat"
 fi
 
 # Point the compose broker-policy bind at the active config_dir (workspace.json

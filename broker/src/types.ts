@@ -26,6 +26,18 @@ const BARE_REPO = z
     message: "repo must not be '.', '..', or contain '..'",
   });
 
+// A bare ticket registry entry name — never a path. This deliberately mirrors
+// BARE_REPO's dot-segment rejection (docs/broker-ticket-routing.md): the request
+// may select only an operator-registered name, never navigate within TASKS_ROOT.
+export const TICKET = z
+  .string()
+  .min(1)
+  .max(100)
+  .regex(/^[A-Za-z0-9._-]+$/, "ticket must be a bare name (letters, digits, . _ -)")
+  .refine((s) => s !== "." && s !== ".." && !s.includes(".."), {
+    message: "ticket must not be '.', '..', or contain '..'",
+  });
+
 // A git branch name. Prefix (branch_prefix from the TRUSTED policy) is checked in
 // the handler, not here. Here we only bar control characters, whitespace, and
 // obvious ref-injection shapes.
@@ -46,6 +58,7 @@ export const PublishRequestSchema = z
     // Body may be empty-ish but must be a string and size-bounded (it lands in a
     // public PR body). No newlines are stripped — gh receives it verbatim as argv.
     body: z.string().max(64 * 1024),
+    ticket: TICKET.optional(),
   })
   .strict();
 
@@ -56,6 +69,7 @@ export type PublishRequest = z.infer<typeof PublishRequestSchema>;
 export type PublishErrorCode =
   | "invalid_request" // request did not parse against PublishRequestSchema
   | "config_missing" // TRUSTED policy (BROKER_POLICY_FILE) unreadable/invalid/untrusted-path
+  | "ticket_not_registered" // routed ticket is absent from the operator-owned registry
   | "repo_not_allowed" // repo is not a bare name / escapes the worktrees root
   | "worktree_missing" // no worktree for this repo on the trusted side
   | "untrusted_config" // coder-writable .git config has exec-/redirect-capable keys

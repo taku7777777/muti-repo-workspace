@@ -70,6 +70,34 @@ export function ticketFromWorktreesRoot(): string | null {
  *  (e.g. /workspaces/muti-repo-workspace); on a host process it self-locates. */
 export const CODER_TREE = path.resolve(process.env.BROKER_CODER_TREE ?? WORKSPACE_ROOT);
 
+/** Operator-asserted base for request-carried ticket routing. Unlike the ticket
+ *  segment, this base never comes from the request (docs/broker-ticket-routing.md). */
+export const TASKS_ROOT = path.resolve(
+  process.env.BROKER_TASKS_DIR ?? path.join(CODER_TREE, "tasks"),
+);
+
+/** Broker-visible, operator-written ticket registry. Missing/unreadable is a
+ *  normal fail-closed state for routed requests, never an implicit allow. */
+export const TICKETS_DIR = path.resolve(
+  process.env.BROKER_TICKETS_DIR ?? "/etc/mrw-broker/tickets",
+);
+
+/** Exact registry membership check (docs/broker-ticket-routing.md, finding 4).
+ *  Validate before any path use, enumerate for a case-sensitive `===` match,
+ *  then reject anything except a regular file. Content is never read. */
+export function isTicketRegistered(ticket: string, ticketsDir = TICKETS_DIR): boolean {
+  if (!SAFE_TICKET.test(ticket) || ticket === "." || ticket === ".." || ticket.includes("..")) {
+    return false;
+  }
+  try {
+    const exact = fs.readdirSync(ticketsDir).find((entry) => entry === ticket);
+    if (exact === undefined) return false;
+    return fs.lstatSync(path.join(ticketsDir, exact)).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /** Where the broker listens. In the container default this is inside a Docker
  *  NAMED VOLUME shared with the coder (BROKER_SOCKET_PATH=/run/broker/publish.sock).
  *  The coder sees the same volume-mounted path via BROKER_SOCKET. */

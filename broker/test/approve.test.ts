@@ -31,6 +31,7 @@ import type { ApprovalView } from "../src/approve.js";
 
 const BASE_VIEW: ApprovalView = {
   repo: "app",
+  ticket: null,
   branch: "codex/T-1",
   headSha: "abc123def456abc123def456abc123def456abc1",
   title: "Some PR",
@@ -46,6 +47,11 @@ const BASE_VIEW: ApprovalView = {
   reviewerVerdict: null,
   testCaveat: false,
 };
+
+test("routed approval renders its registered ticket; legacy approval omits the line", () => {
+  assert.ok(renderHeader({ ...BASE_VIEW, ticket: "T-1" }).includes("ticket:  T-1"));
+  assert.ok(!renderHeader(BASE_VIEW).split("\n").some((line) => line.startsWith("ticket:")));
+});
 
 const CAVEAT_LINE = "caveat: diff touches test files/config — the green-tests gate may not be independent";
 

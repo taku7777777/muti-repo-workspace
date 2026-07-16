@@ -47,5 +47,11 @@
 /reviewer/node_modules/
 /reviewer/dist/
 
+# --- Thread B browser-approval serve ---
+# Same reasoning again: build/runtime artifacts only, never the source
+# (serve/src, serve/package.json etc. ARE committed).
+/serve/node_modules/
+/serve/dist/
+
 # --- OS noise ---
 .DS_Store

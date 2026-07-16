@@ -18,18 +18,22 @@
  *      failure (feature off, unreachable, timeout, malformed reply) yields a null
  *      verdict and NEVER throws; it cannot block or fail a publish, only annotate
  *      the human gate below;
- *   8. HUMAN approves at the broker, seeing the resolved target + sha AND the
- *      reviewer's verdict, if any (cancellable);
+ *   8. HUMAN approves at the broker OR IN A BROWSER (Thread B), seeing the resolved
+ *      target + sha AND the reviewer's verdict, if any — ApprovalHub.decide()
+ *      races the TTY prompt against socket decisions from `mrw serve`; first
+ *      wins (cancellable, same as before Thread B existed);
  *   9. F6: re-scan config, re-resolve+re-validate the target, re-confirm the sha —
  *      all IN-PROCESS, synchronously, immediately before push; any mismatch aborts;
  *  10. push the EXACT approved sha to the constructed URL from the scratch repo,
- *      then `gh pr create` against the explicit --repo.
+ *      then `gh pr create` against the explicit --repo. Every terminal path from
+ *      here on reports its outcome to the hub (hub.reportOutcome) so `mrw serve`'s
+ *      "pushing…" state always resolves to a concrete result.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { approveAtBroker } from "./approve.js";
-import { GITHUB_TOKEN, WORKTREES_ROOT, loadPolicy } from "./config.js";
+import { GITHUB_TOKEN, WORKTREES_ROOT, loadPolicy, ticketFromWorktreesRoot } from "./config.js";
 import type { Policy } from "./config.js";
+import { ApprovalHub } from "./gate.js";
 import { maybeConsultReviewer } from "./reviewer.js";
 import {
   canonicalHttpsUrl,
@@ -49,6 +53,15 @@ import {
 import { PublishRequestSchema } from "./types.js";
 import type { PublishErrorCode, PublishResponse, PublishRequest } from "./types.js";
 import type { Remote } from "./git.js";
+
+// One hub per broker process (module singleton, not per-request): decide()
+// needs to be the SAME instance that approval-server.ts is wired to in
+// index.ts, so a socket decision submitted on one connection can resolve the
+// decide() call currently in flight from handleRequest() below. Exported so
+// index.ts can pass it to startApprovalServer() when BROKER_APPROVAL_SOCKET
+// is set; with the socket server never started, nothing ever calls
+// submitApprove/submitDecline and decide() degrades to TTY-only.
+export const hub = new ApprovalHub();
 
 function fail(code: PublishErrorCode, error: string): PublishResponse {
   return { ok: false, code, error };
@@ -175,10 +188,12 @@ export async function handleRequest(raw: unknown, signal?: AbortSignal): Promise
     // returns null; this call NEVER throws into the publish path.
     const reviewerVerdict = await maybeConsultReviewer(render.diff, req.title, req.body, signal);
 
-    // 8. Human gate (cancellable). No await between here and the push except this one.
-    let approved: boolean;
+    // 8. Human gate (cancellable): ApprovalHub.decide() races the TTY prompt
+    //    against a browser decision (Thread B); first wins. No await between
+    //    a resolved decision and the push except the ones below (F6/10).
+    let decision: { approved: boolean; channel: "tty" | "socket" };
     try {
-      approved = await approveAtBroker(
+      decision = await hub.decide(
         {
           repo: req.repo,
           branch: actualBranch,
@@ -194,39 +209,56 @@ export async function handleRequest(raw: unknown, signal?: AbortSignal): Promise
           diffStat: render.diffStat,
           diff: render.diff,
           reviewerVerdict,
+          shortSha: shaBefore.slice(0, 12),
+          ticket: ticketFromWorktreesRoot(),
         },
         signal,
       );
     } catch (e) {
-      // Aborted (approval budget / dropped client) => never pushed.
+      // Aborted (approval budget / dropped client) => never pushed. Same
+      // "canceled" semantics as pre-Thread-B: decide() rejects exactly when
+      // approveAtBroker used to.
       return { ok: false, code: "canceled", error: `approval canceled: ${(e as Error).message}`, sha: shaBefore };
     }
-    if (!approved) {
+    if (!decision.approved) {
       return { ok: false, code: "declined", error: "human declined at the broker gate", sha: shaBefore };
     }
 
     // 9. F6 — re-validate IN-PROCESS, synchronously, immediately before push. No
     //    await here, so the approval budget cannot interleave between check and push.
+    //    Every return from here on is a post-approval terminal path, so each one
+    //    reports its outcome to the hub — otherwise `mrw serve`'s "pushing…" state
+    //    (which is keyed off this exact approval) would never resolve.
     if (signal?.aborted) {
+      hub.reportOutcome({ ok: false, error: "aborted after approval, before push" });
       return { ok: false, code: "canceled", error: "aborted after approval, before push", sha: shaBefore };
     }
     const badNow = scanUntrustedLocalConfig(wt);
-    if (badNow) return fail("untrusted_config", `git config changed to untrusted before push: ${badNow}`);
+    if (badNow) {
+      hub.reportOutcome({ ok: false, error: `git config changed to untrusted before push: ${badNow}` });
+      return fail("untrusted_config", `git config changed to untrusted before push: ${badNow}`);
+    }
 
     const t2 = resolveTarget(wt, cfg);
-    if ("ok" in t2) return t2;
+    if ("ok" in t2) {
+      // resolveTarget's "ok" in t2 branch is always its fail() (ok:false)
+      // shape in practice (the success branch never sets `ok` at all); the
+      // `!t2.ok` check below is what actually narrows PublishResponse's
+      // union down to the variant with `.error` for the type checker.
+      if (!t2.ok) hub.reportOutcome({ ok: false, error: t2.error });
+      return t2;
+    }
     if (t2.url !== url) {
-      return fail("host_not_allowed", `push target changed after approval ('${url}' -> '${t2.url}'); aborting`);
+      const error = `push target changed after approval ('${url}' -> '${t2.url}'); aborting`;
+      hub.reportOutcome({ ok: false, error });
+      return fail("host_not_allowed", error);
     }
 
     const shaNow = headSha(wt);
     if (shaNow !== shaBefore) {
-      return {
-        ok: false,
-        code: "sha_changed",
-        error: `worktree HEAD moved after approval (${shaBefore} -> ${shaNow ?? "unknown"}); aborting`,
-        sha: shaBefore,
-      };
+      const error = `worktree HEAD moved after approval (${shaBefore} -> ${shaNow ?? "unknown"}); aborting`;
+      hub.reportOutcome({ ok: false, error });
+      return { ok: false, code: "sha_changed", error, sha: shaBefore };
     }
 
     // 10. Push the EXACT approved sha to the constructed URL, then open the PR.
@@ -239,12 +271,9 @@ export async function handleRequest(raw: unknown, signal?: AbortSignal): Promise
       token: GITHUB_TOKEN,
     });
     if (!pushed.ok) {
-      return {
-        ok: false,
-        code: "push_failed",
-        error: `git push failed (status ${pushed.status ?? "null"}): ${(pushed.stderr || pushed.stdout).trim()}`,
-        sha: shaBefore,
-      };
+      const error = `git push failed (status ${pushed.status ?? "null"}): ${(pushed.stderr || pushed.stdout).trim()}`;
+      hub.reportOutcome({ ok: false, error });
+      return { ok: false, code: "push_failed", error, sha: shaBefore };
     }
 
     const pr = ghPrCreate({
@@ -257,14 +286,12 @@ export async function handleRequest(raw: unknown, signal?: AbortSignal): Promise
       token: GITHUB_TOKEN,
     });
     if (!pr.ok) {
-      return {
-        ok: false,
-        code: "pr_failed",
-        error: `push succeeded but gh pr create failed (status ${pr.status ?? "null"}): ${(pr.stderr || pr.stdout).trim()}`,
-        sha: shaBefore,
-      };
+      const error = `push succeeded but gh pr create failed (status ${pr.status ?? "null"}): ${(pr.stderr || pr.stdout).trim()}`;
+      hub.reportOutcome({ ok: false, error });
+      return { ok: false, code: "pr_failed", error, sha: shaBefore };
     }
 
+    hub.reportOutcome({ ok: true, prUrl: pr.url });
     return { ok: true, sha: shaBefore, branch: actualBranch, prUrl: pr.url };
   } finally {
     removeScratch(scratch);

@@ -8,6 +8,7 @@
 // Plain ESM, Node builtins only. No external dependencies.
 
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -180,7 +181,8 @@ Subcommands:
   config [--state-root <abs|"">]       show (or set) toolHome/config_dir/state_root/repos
   init [dir]                           scaffold a per-workspace config at <dir>/.mrw/
                                         (default cwd); copies workspace.json, repos.json,
-                                        purposes/, broker-policy.json from <toolHome>/config.
+                                        purposes/, broker-policy.json, serve.json (+
+                                        serve.css if present) from <toolHome>/config.
                                         Refuses if <dir>/.mrw/ already exists.
   setup [args...]                      exec scripts/setup-workspace.sh
   infra-up [args...]                   exec scripts/devcontainer-up.sh
@@ -197,6 +199,14 @@ Subcommands:
   list [args...]                       exec scripts/list-task.sh
   close <TICKET_ID> [--force]          exec scripts/remove-workspace.sh
   doctor [args...]                     exec scripts/verify-workspace.sh
+  serve [up|down|url|status]           Thread B browser approval (docs/browser-approval.md)
+    [--port N] [--no-open]             default 'up': starts the profile-gated 'serve'
+                                        compose service (--no-deps, so a running broker is
+                                        never recreated), mints a fresh session token, and
+                                        prints (and on macOS opens) a tokened
+                                        http://localhost:<port>/?token=<token> URL.
+                                        'down' stops it; 'url' reprints the URL for an
+                                        already-running container; 'status' is compose ps.
 
 toolHome resolves from mrw's own install location (works from any cwd).
 config_dir resolves from $MRW_CONFIG_DIR, else the nearest ancestor .mrw/
@@ -665,7 +675,7 @@ function cmdInit(argv) {
   const srcConfigDir = path.join(toolHome, "config");
   fs.mkdirSync(mrwDir, { recursive: true });
 
-  for (const file of ["workspace.json", "repos.json", "broker-policy.json"]) {
+  for (const file of ["workspace.json", "repos.json", "broker-policy.json", "serve.json"]) {
     const src = path.join(srcConfigDir, file);
     if (fs.existsSync(src)) {
       fs.copyFileSync(src, path.join(mrwDir, file));
@@ -679,6 +689,14 @@ function cmdInit(argv) {
     copyDirFlat(srcPurposesDir, path.join(mrwDir, "purposes"));
   }
 
+  // serve.css is an OPTIONAL, per-workspace cosmetic override (see
+  // docs/browser-approval.md) — unlike the files above it does not ship by
+  // default, so its absence is not warned about.
+  const srcServeCss = path.join(srcConfigDir, "serve.css");
+  if (fs.existsSync(srcServeCss)) {
+    fs.copyFileSync(srcServeCss, path.join(mrwDir, "serve.css"));
+  }
+
   console.log(`Initialized a per-workspace config at ${mrwDir}`);
   console.log("");
   console.log("Next steps:");
@@ -690,6 +708,213 @@ function cmdInit(argv) {
     `  3. Keep ${path.join(mrwDir, "broker-policy.json")} in sync with the same allowed_push_orgs/allowed_push_hosts (it is the authoritative gate on the container push path).`
   );
   console.log(`  4. cd ${targetDir} && mrw setup   # or: MRW_CONFIG_DIR=${mrwDir} mrw setup`);
+}
+
+// ---------------------------------------------------------------------------
+// mrw serve — Thread B browser approval (docs/browser-approval.md). Unlike
+// every other subcommand above, this does NOT go through runScript/
+// runCommand's exec-and-exit pattern for `up`/`url`: it needs to inspect
+// docker's output (to read back a port/token, or to warn without failing)
+// before deciding what to print, so it calls docker directly via spawnSync
+// and manages its own exit codes. `down`/`status` are simple enough to
+// reuse runCommand (matching `infra-down`'s style).
+const COMPOSE_FILE = path.join(".devcontainer", "docker-compose.yml");
+const SERVE_CONTAINER_PORT = 7787;
+
+// resolveServePort — serve.json's "port" (if present and a valid positive
+// integer) is the default; an explicit --port always wins. Any parse error
+// in serve.json is a WARN-and-fall-back, matching serve's own "never refuse
+// to start over cosmetic config" posture (see config/serve.json's $note) —
+// this is only the port `mrw serve up` publishes on the host, not something
+// worth hard-failing over.
+function resolveServePort(portFlag) {
+  let port = SERVE_CONTAINER_PORT;
+  const serveJsonPath = path.join(configDir, "serve.json");
+  if (fs.existsSync(serveJsonPath)) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(serveJsonPath, "utf8"));
+      if (typeof cfg.port === "number" && Number.isInteger(cfg.port) && cfg.port > 0) {
+        port = cfg.port;
+      }
+    } catch (err) {
+      console.error(`warning: could not parse ${serveJsonPath} (${err.message}) — using default port ${port}`);
+    }
+  }
+  if (portFlag !== null) {
+    const n = Number(portFlag);
+    if (!Number.isInteger(n) || n <= 0) {
+      console.error(`error: --port must be a positive integer (got '${portFlag}')`);
+      process.exit(1);
+    }
+    port = n;
+  }
+  return port;
+}
+
+function cmdServeUp(argv) {
+  let portFlag = null;
+  let noOpen = false;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--port") {
+      if (i + 1 >= argv.length) {
+        console.error("error: --port requires a value");
+        process.exit(1);
+      }
+      portFlag = argv[++i];
+      continue;
+    }
+    if (a === "--no-open") {
+      noOpen = true;
+      continue;
+    }
+    console.error(`error: mrw serve up: unrecognized argument '${a}'`);
+    process.exit(2);
+  }
+
+  const port = resolveServePort(portFlag);
+  const token = crypto.randomBytes(32).toString("hex");
+
+  // Mirrors scripts/devcontainer-up.sh's OWN conditional MRW_CONFIG_DIR
+  // export (not runScript's/runCommand's always-set behavior above): this
+  // spawns `docker compose` directly, so it must reproduce exactly what
+  // that script does for the compose file's `${MRW_CONFIG_DIR:-../config}`
+  // interpolation to resolve identically — legacy mode omits the var
+  // entirely so the compose default takes over, byte-identical to before
+  // Thread B existed.
+  const env = { ...process.env, MRW_SERVE_TOKEN: token, MRW_SERVE_PORT: String(port) };
+  if (configMode === "workspace") {
+    env.MRW_CONFIG_DIR = configDir;
+  }
+
+  const upResult = spawnSync(
+    "docker",
+    ["compose", "-f", COMPOSE_FILE, "--profile", "serve", "up", "-d", "--no-deps", "serve"],
+    { stdio: "inherit", cwd: toolHome, env }
+  );
+  if (upResult.error) {
+    console.error(`error: failed to run docker compose: ${upResult.error.message}`);
+    process.exit(1);
+  }
+  if (upResult.status !== 0) {
+    process.exit(upResult.status === null ? 1 : upResult.status);
+  }
+
+  // Warn (never fail) if the broker container isn't up yet — the approval
+  // page will render a clear "broker unreachable" state (see
+  // docs/browser-approval.md) until `mrw infra-up` starts it. --no-deps
+  // above means this command never starts the broker itself.
+  const brokerCheck = spawnSync(
+    "docker",
+    ["compose", "-f", COMPOSE_FILE, "ps", "--status", "running", "-q", "broker"],
+    { cwd: toolHome, env, encoding: "utf8" }
+  );
+  if (!brokerCheck.error && brokerCheck.status === 0 && !(brokerCheck.stdout || "").trim()) {
+    console.error(
+      "warning: the broker container is not running yet — the approval page will show " +
+        "\"broker unreachable\" until you run 'mrw infra-up'."
+    );
+  }
+
+  const url = `http://localhost:${port}/?token=${token}`;
+  console.log(url);
+
+  if (process.platform === "darwin" && !noOpen) {
+    // Best-effort: a failure to open a browser tab is never a reason to
+    // fail this command — the URL is already printed above.
+    spawnSync("open", [url]);
+  }
+}
+
+function cmdServeDown(argv) {
+  if (argv.length > 0) {
+    console.error(`error: mrw serve down: unrecognized argument '${argv[0]}'`);
+    process.exit(2);
+  }
+  runCommand("docker", ["compose", "-f", COMPOSE_FILE, "--profile", "serve", "rm", "-sf", "serve"]);
+}
+
+function cmdServeStatus(argv) {
+  if (argv.length > 0) {
+    console.error(`error: mrw serve status: unrecognized argument '${argv[0]}'`);
+    process.exit(2);
+  }
+  runCommand("docker", ["compose", "-f", COMPOSE_FILE, "ps", "serve"]);
+}
+
+function cmdServeUrl(argv) {
+  if (argv.length > 0) {
+    console.error(`error: mrw serve url: unrecognized argument '${argv[0]}'`);
+    process.exit(2);
+  }
+
+  const idResult = spawnSync("docker", ["compose", "-f", COMPOSE_FILE, "ps", "-q", "serve"], {
+    cwd: toolHome,
+    encoding: "utf8",
+  });
+  const containerId = (idResult.stdout || "").trim().split("\n")[0];
+  if (idResult.error || !containerId) {
+    console.error("error: 'serve' is not running — run 'mrw serve up' first.");
+    process.exit(1);
+  }
+
+  const envResult = spawnSync("docker", ["inspect", "--format", "{{json .Config.Env}}", containerId], {
+    encoding: "utf8",
+  });
+  if (envResult.error || envResult.status !== 0) {
+    console.error(`error: 'docker inspect' failed for the 'serve' container (${containerId}).`);
+    process.exit(1);
+  }
+  let containerEnv;
+  try {
+    containerEnv = JSON.parse(envResult.stdout);
+  } catch (err) {
+    console.error(`error: could not parse 'docker inspect' output: ${err.message}`);
+    process.exit(1);
+  }
+  const tokenEntry = Array.isArray(containerEnv)
+    ? containerEnv.find((e) => e.startsWith("SERVE_SESSION_TOKEN="))
+    : null;
+  const token = tokenEntry ? tokenEntry.slice("SERVE_SESSION_TOKEN=".length) : "";
+  if (!token) {
+    console.error("error: could not read SERVE_SESSION_TOKEN from the running 'serve' container.");
+    process.exit(1);
+  }
+
+  const portResult = spawnSync("docker", ["port", containerId, `${SERVE_CONTAINER_PORT}/tcp`], {
+    encoding: "utf8",
+  });
+  const portLine = (portResult.stdout || "").trim().split("\n")[0];
+  const portMatch = portLine ? /:(\d+)$/.exec(portLine) : null;
+  const port = portMatch ? portMatch[1] : String(SERVE_CONTAINER_PORT);
+
+  console.log(`http://localhost:${port}/?token=${token}`);
+}
+
+function cmdServe(argv) {
+  let action = "up";
+  let rest = argv;
+  if (argv.length > 0 && !argv[0].startsWith("-")) {
+    action = argv[0];
+    rest = argv.slice(1);
+  }
+  switch (action) {
+    case "up":
+      cmdServeUp(rest);
+      break;
+    case "down":
+      cmdServeDown(rest);
+      break;
+    case "url":
+      cmdServeUrl(rest);
+      break;
+    case "status":
+      cmdServeStatus(rest);
+      break;
+    default:
+      console.error(`error: mrw serve: unknown action '${action}' (expected up|down|url|status)`);
+      process.exit(2);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -739,6 +964,10 @@ function main() {
 
     case "doctor":
       runScript("verify-workspace.sh", rest);
+      break;
+
+    case "serve":
+      cmdServe(rest);
       break;
 
     default:

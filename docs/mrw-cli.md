@@ -221,6 +221,8 @@ still worth having, but the byte-match is not the thing it needs to rescue.
 
 ## Thread B — browser approval (independent, ships separately)
 
+**Status: BUILT** — see [browser-approval.md](browser-approval.md).
+
 The user's sketch (steps 5–6) shows the approval moving to a browser: diff
 summary, review result, full diff, then approve. This is a good rendering
 upgrade but touches the **one authoritative gate** in the whole design, so:

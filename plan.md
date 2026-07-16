@@ -31,7 +31,7 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
   種別判断、ここで `work_type` を確定）。
 - ビルド形態は **独立バイナリ `mrw`**（skills-in-session ではなく）。
 
-### Thread B — ブラウザ承認（独立・未着手）
+### Thread B — ブラウザ承認（✅ BUILT — docs/browser-approval.md）
 - 差分概要 / レビュー結果 / 全 diff を Web で綺麗に表示。
 - ただし**承認行為は SHA 打鍵を維持**（唯一の権威ゲート。ボタン1押しに退化させない）。
 - 配信は **token を持たない別プロセス `mrw serve`** が担い、broker が SHA を再検証。
@@ -76,6 +76,7 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
 | **Phase 2.4** | task-up triage leaf（LLM 型付き分類）+ mrw 配線 | `99f2035` | 81/81 tests + **ライブ triage** |
 | **Phase 2.3** | native macOS 経路パリティ（外部 state_root 対応） | `52ad98e` | **機能シム**（add-repository を実走） |
 | **Phase 2.2** | per-workspace config `.mrw/`（複数ワークスペース） | `abea32b` | 独立レビュー + **セキュリティ修正** + exploit ブロック検証 |
+| **Thread B** | ブラウザ承認 — `mrw serve`（token-less コンテナ）+ broker approval socket。SHA 打鍵は broker が in-process 再検証、TTY ゲートとレース。GitHub パリティ UI + `.mrw/serve.json`/`serve.css` カスタマイズ | (次コミット) | broker 36 + serve 120 tests / 実ブラウザ CDP E2E（XSS DOM 検査・SHA 承認実走）/ HTTP セキュリティ 11+23 項目 / compose 実機（`mrw serve up`→healthy）/ 独立セキュリティレビュー = ブロッカーなし |
 
 （前提: `dfbea8c`/`b69414a` = per-ticket OTEL telemetry、`52dcce4` = 設計メモ、
 `bc0c69e`/`034a4a6` = DEMO-6/7 記録 も同ブランチに含む）
@@ -89,13 +90,20 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
     （allow はディレクトリ trust が前提。trust ダイアログが事前許可ツールを列挙）;
     (c)(d)(e) claudeMdExcludes / elicitation / statusLine はバイナリに実在確認
     （挙動検証は C3 selfcheck に委譲）。
-  - C2: `spined` デーモン（既存 executor/ledger の MCP アダプタ + tests）
+  - C2: ✅ harness スライス完了（`20ddb6e`）— spined デーモン（fail-fast 起動 +
+    spine-prepare + atomic rename ロック + keep-alive 進捗 + budget 免除 status +
+    stdio guard）+ エンジン適応（approval policy / session_ended / ledger
+    versioned load）。独立レビュー SHIP-WITH-FIXES → 全件反映、166/166 tests。
+    **broker caveat スライスは未コミット**（handler.ts が Thread B の未コミット
+    作業と交差 — Thread B の land 後にコミット）。
   - C3: フロントエンド構成生成 + `mrw chat`/task-up/cmux 配線 + CLI バージョン固定
   - C4: 不変条件チェック + 独立レビュー + ライブ E2E
 - **feat/mrw pre-merge blockers（2026-07-16 独立レビュー）** — push-guard config の
   canonicalize / triage leaf の姿勢修正 / telemetry 網 internal 検証。Thread C とは
   独立のワークストリーム（マージ前に要修正）。
-- **Thread B（ブラウザ承認 / `mrw serve`）** — 未着手。
+- ~~**Thread B（ブラウザ承認 / `mrw serve`）**~~ — ✅ 完了（上の表参照）。残フォローアップ:
+  稼働中 broker コンテナは旧イメージのため、次回 `mrw infra-up --build` 後に
+  コンテナ内 broker での承認ライブ E2E を 1 回実施（ホスト側シムでは検証済み）。
 - **work_type → telemetry の per-ticket 配線** — 現状 stack 共有のため `MRW_WORK_TYPE`
   は stack 単位。per-ticket 帰属は別途要設計（telemetry の per-ticket 分離議論に接続）。
 - **master へのマージ（PR 作成）** — 一通り完了確認後。

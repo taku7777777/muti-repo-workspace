@@ -121,6 +121,10 @@ repo checkout and can only Read/Grep/Glob, never Edit/Write/Bash).
 | `mrw list [args...]` | exec `scripts/list-task.sh` |
 | `mrw close <TICKET_ID> [--force]` | exec `scripts/remove-workspace.sh` |
 | `mrw doctor [args...]` | exec `scripts/verify-workspace.sh` |
+| `mrw serve [up]` `[--port N] [--no-open]` | boot the browser-approval page (compose profile `serve`, `--no-deps` — a running `broker` is never recreated); mints a fresh session token and prints (on macOS also opens) a tokened `http://localhost:<port>/?token=<token>` URL. Warns, but does not fail, if `broker` isn't running yet. |
+| `mrw serve down` | stop it: `docker compose --profile serve rm -sf serve` |
+| `mrw serve url` | reprint the tokened URL for an already-running `serve` container (reads its published port and session token back via `docker port`/`docker inspect`) |
+| `mrw serve status` | `docker compose ps serve` |
 | unknown subcommand | error + usage, exit 2 |
 
 ## `mrw config --state-root`
@@ -132,6 +136,28 @@ the `"state_root"` line's value is changed, so every other key (including the
 `_note` fields), the 2-space indentation, blank lines, and the trailing
 newline are preserved untouched. Setting a value and then clearing it back to
 `""` leaves the file byte-identical to before.
+
+## Browser approval (`mrw serve`)
+
+Thread B (see `docs/mrw-cli.md`'s "Thread B" section) adds a **separate,
+token-less** process that renders the broker's sha-typed publish gate as a
+GitHub-PR-style web page instead of (or alongside) the broker container's
+TTY prompt. `mrw serve` never holds `BROKER_GITHUB_TOKEN` and cannot push —
+it relays a typed short-sha decision to the broker over a new unix socket
+(`approve-sock`), and the broker independently re-verifies the submitted sha
+against the actual pending publish before anything is pushed, so a
+compromised `serve` can never approve a different sha, target, or content
+than the one already pending.
+
+`mrw serve up` (the default when no action is given) starts the `serve`
+compose service under its own `profiles: ["serve"]` gate — a plain `mrw
+infra-up` never starts it — publishes it on `127.0.0.1:<port>` only, and
+prints a session-tokened URL to open. `mrw serve down|url|status` stop it,
+reprint the URL, or show its container status, respectively. Full setup,
+UI guide, customization reference (`config/serve.json` + `serve.css`), and
+the security/trust-model writeup live in
+[`../docs/browser-approval.md`](../docs/browser-approval.md) (see also its
+Japanese mirror, `browser-approval.ja.md`).
 
 ## Deferred (later slices)
 

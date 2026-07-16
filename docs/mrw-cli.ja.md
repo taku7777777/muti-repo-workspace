@@ -233,6 +233,8 @@ SDK クエリを1回実行し、次を返す:
 
 ## Thread B — ブラウザ承認(独立、別途出荷)
 
+**Status: BUILT** — [browser-approval.ja.md](browser-approval.ja.md) を参照。
+
 ユーザーのスケッチ(ステップ5–6)は、承認をブラウザへ移す案を示している: diff
 summary、review 結果、full diff、そして approve。これはレンダリングの良い
 アップグレードだが、この設計全体の中で**唯一の権威あるゲート**に触れるので:

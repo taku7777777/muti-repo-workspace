@@ -70,7 +70,11 @@ RUN chown -R node:node /broker \
 # named volume: the broker writes diff files here (rw) for the OPTIONAL
 # advisory reviewer to read (ro, see reviewer.Dockerfile) — pre-created
 # node-owned so the fresh volume mount doesn't leave it root:root 0755.
-RUN install -d -o node -g node -m 0755 /run/broker /var/mrw/review-diffs
+#
+# /run/approve (Thread B) is the same lesson a THIRD time, for the
+# `approve-sock` named volume: the broker LISTENS there
+# (approval-server.ts binds approve.sock as `node`), `mrw serve` only dials.
+RUN install -d -o node -g node -m 0755 /run/broker /run/approve /var/mrw/review-diffs
 
 USER node
 CMD ["npm", "start"]

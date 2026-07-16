@@ -47,6 +47,17 @@ name: mrw-phase0
 #                 consult the broker may make before the human gate — never
 #                 depended-on, never load-bearing (see the `reviewer` and `broker`
 #                 service comments below, and broker/src/reviewer.ts).
+#
+# Thread B (docs/browser-approval.md) adds a 6th, OPTIONAL service:
+#   serve         token-less browser-approval renderer. Profile-gated
+#                 (`profiles: ["serve"]` — never started by a plain `up -d`,
+#                 only `mrw serve up`). Talks to the broker over a NEW unix
+#                 socket (`approve-sock`, shared ONLY with `broker` — see
+#                 both services' comments below); never sees
+#                 BROKER_GITHUB_TOKEN and cannot push. Publishes
+#                 127.0.0.1:<port> on the host for the browser to reach; no
+#                 cage (`worker`/`orchestrator`/`reviewer`, all on `caged`)
+#                 has a route to it.
 
 services:
   # --------------------------------------------------------------------------
@@ -336,6 +347,17 @@ services:
       # writing here is harmless when the feature is off: nothing ever reads
       # the directory if REVIEWER_SOCKET is unset.
       REVIEWER_DIFF_DIR: /var/mrw/review-diffs
+      # Thread B (docs/browser-approval.md): the approval socket the
+      # OPTIONAL `mrw serve` browser UI connects to. Always-on is safe,
+      # unlike REVIEWER_SOCKET's null-passthrough above — the `approve-sock`
+      # volume (see this service's volumes: below) is shared ONLY with
+      # `serve`, which is itself profile-gated and off by default; with
+      # `serve` not running, nobody can connect to this socket at all, and
+      # the existing TTY gate (approve.ts, this container's own stdin) is
+      # completely unchanged — it races the socket, first decision wins
+      # (broker/src/gate.ts). Set unconditionally here so `mrw serve up`
+      # never needs a broker restart to pick it up.
+      BROKER_APPROVAL_SOCKET: /run/approve/approve.sock
     # NOTE: intentionally NO `env_file: .env` here — the broker must not load the
     # coder's shared .env (which would also mean a token written there reaches the
     # coder). The token arrives via the `environment` interpolation above.
@@ -358,6 +380,16 @@ services:
       # M3: where the broker WRITES ground-truth diff files for the (OPTIONAL)
       # reviewer to read — rw here, ro in `reviewer` below.
       - review-diffs:/var/mrw/review-diffs
+      # Thread B: the approval socket, shared ONLY with `serve` below — see
+      # the BROKER_APPROVAL_SOCKET env comment above for why always-on is
+      # safe. CRITICAL INVARIANT: this volume must NEVER be mounted into
+      # `worker`, `orchestrator`, or `reviewer`. Any of those cages already
+      # knows its OWN pending commit sha; if it also held this socket it
+      # could self-approve its own publish — the entire point of the
+      # sha-typed human gate is that the party proposing a change cannot
+      # also be the party confirming it. `broker` and `serve` are the ONLY
+      # two services allowed to list this volume anywhere in this file.
+      - approve-sock:/run/approve
       # The coder-writable worktrees — READ-ONLY. The broker reads objects by sha;
       # it never writes here and never executes anything from here.
       - ..:/workspaces/muti-repo-workspace:ro
@@ -479,6 +511,109 @@ services:
     command: ["npm", "start"]
 
   # --------------------------------------------------------------------------
+  # serve: Thread B's token-less browser-approval renderer (docs/browser-
+  # approval.md). OPTIONAL and profile-gated — `profiles: ["serve"]` means a
+  # plain `docker compose up -d` NEVER starts it; only `mrw serve up`
+  # (`--profile serve up -d --no-deps serve`) does, so infra-up's behavior is
+  # byte-identical to before this service existed. It renders the SAME
+  # ground-truth ApprovalView the broker's TTY gate already shows (relayed
+  # over the `approve-sock` socket below) and lets the human type the short
+  # sha into the page instead of the broker's stdin — but the broker NEVER
+  # trusts what this container says: every submitted sha is re-verified
+  # IN-PROCESS against the actual pending publish (broker/src/gate.ts)
+  # before anything is pushed. A compromised `serve` can therefore at most
+  # auto-approve the ONE exact sha already pending, to the SAME allowlist-
+  # validated target the TTY gate would have pushed to — nothing else (see
+  # docs/browser-approval.md's trust model for the full writeup and every
+  # mitigation). It holds NO GitHub token, NO git, NO gh, and no workspace
+  # or state_root mount — everything it runs is baked into the image at
+  # build (serve.Dockerfile), same supply-chain posture as broker/reviewer.
+  # Auth is a per-boot session token (SERVE_SESSION_TOKEN, minted fresh by
+  # `mrw serve up`) plus CSRF + Host-header checks, all handled in-process
+  # by the serve package itself — this container depends on nothing outside
+  # itself for that.
+  # --------------------------------------------------------------------------
+  serve:
+    profiles: ["serve"]
+    build:
+      context: ..
+      dockerfile: .devcontainer/serve.Dockerfile
+    user: node
+    working_dir: /serve
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # `approve` ONLY — see the networks: block below for why this must be a
+    # non-internal bridge (the localhost port publish needs it), and why
+    # that is an accepted, honestly-documented tradeoff. Deliberately NOT on
+    # `caged`/`egress`/`telemetry`: no cage can reach this service, and it
+    # talks to `broker` over the `approve-sock` named volume, not TCP, so it
+    # does not need to share a network with `broker` either.
+    networks:
+      - approve
+    environment:
+      SERVE_APPROVAL_SOCKET: /run/approve/approve.sock
+      SERVE_PORT: 7787
+      # 0.0.0.0 inside the container is safe here — the localhost-ONLY
+      # property comes from the host port publish below
+      # (127.0.0.1:<port>:7787), not from the in-container bind address.
+      SERVE_BIND: 0.0.0.0
+      # Fail-closed IN-PROCESS (see the serve package's own env contract):
+      # empty or short ⇒ serve logs and exit(1) rather than ever listening
+      # unauthenticated. Deliberately NOT a compose-level
+      # `${MRW_SERVE_TOKEN:?}` hard-require: interpolation runs for EVERY
+      # service's environment block even when that service's profile is
+      # inactive, so a `:?` here would make a plain `mrw infra-up` (no
+      # `--profile serve`, MRW_SERVE_TOKEN never set) fail outright just
+      # parsing this file. `mrw serve up` always mints a fresh crypto-random
+      # token before invoking compose (see cli/mrw.mjs), so on the one path
+      # that actually starts this service the variable is never empty in
+      # practice — the in-process check is what makes that a GUARANTEE
+      # rather than an assumption resting on the caller's good behavior.
+      SERVE_SESSION_TOKEN: ${MRW_SERVE_TOKEN:-}
+      SERVE_CONFIG_DIR: /etc/mrw-serve
+      # NOTE: no HTTP_PROXY/HTTPS_PROXY, no CLAUDE_CODE_OAUTH_TOKEN/
+      # ANTHROPIC_API_KEY, no BROKER_GITHUB_TOKEN here — `serve` reaches
+      # nothing but the broker (via the socket volume below) and has no
+      # LLM/egress surface of its own to gate.
+    volumes:
+      # The approval socket — see the `broker` service's matching comment
+      # above (CRITICAL: this volume is mounted ONLY here and in `broker`).
+      - approve-sock:/run/approve
+      # Workspace-owner-trusted cosmetic/behavior config (serve.json,
+      # optionally serve.css) — read-only, same trust tier as the broker's
+      # policy bind above (config/serve.json documents every field). NOT
+      # the coder-writable /workspaces tree, and deliberately no
+      # MRW_STATE_ROOT-style tasks/repositories mount either: `serve` has
+      # no worktrees, no tasks/, no repositories/ — nothing to render from
+      # the filesystem beyond this, only what the broker sends it over the
+      # approve-sock socket.
+      - ${MRW_CONFIG_DIR:-../config}:/etc/mrw-serve:ro
+    ports:
+      # Host-published, localhost-ONLY (the 127.0.0.1 prefix, not just the
+      # container-side bind) — this is what actually confines the browser
+      # UI to this machine; SERVE_BIND=0.0.0.0 above is safe only because
+      # of this line.
+      - "127.0.0.1:${MRW_SERVE_PORT:-7787}:7787"
+    healthcheck:
+      # No curl/wget baked into this image (kept minimal, same posture as
+      # reviewer.Dockerfile) — Node itself makes the request. Ready = the
+      # HTTP server is actually accepting requests, not merely "process
+      # started". /healthz is unauthenticated by design (no token, no
+      # state), exactly so this healthcheck needs no session token.
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:7787/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 60s
+    command: ["npm", "start"]
+
+  # --------------------------------------------------------------------------
   # egress-proxy: the ONLY path out. Dual-homed on `caged` (to receive the
   # coder's requests) and `egress` (to reach the internet). Enforces the
   # baked-in domain allowlist. Also drops ALL caps — an explicit proxy needs
@@ -537,6 +672,25 @@ networks:
   telemetry:
     name: mrw-telemetry
     external: true
+  # Thread B (docs/browser-approval.md): the `serve` service's ONLY network.
+  # NON-internal (a normal bridge), unlike `caged`/`telemetry` above — the
+  # localhost port publish (127.0.0.1:${MRW_SERVE_PORT:-7787}:7787, see the
+  # `serve` service) needs a route out to the host, which an
+  # `internal: true` network does not provide.
+  #   - HONEST tradeoff: this gives `serve` theoretical NAT egress to the
+  #     internet (an `internal: true` network cannot have one). Accepted
+  #     because `serve` is token-less (holds no secret worth exfiltrating),
+  #     has zod-only runtime deps baked into the image at build (no
+  #     arbitrary code can land there without a rebuild — serve.Dockerfile),
+  #     and its CSP (`default-src 'none'`) confines what the page itself can
+  #     fetch/execute in the browser. This is a materially smaller blast
+  #     radius than `egress` (below), which is real GitHub push access.
+  #   - Neither `broker` nor any cage (`worker`/`orchestrator`/`reviewer`,
+  #     all on `caged`) is attached here: `approve` has no route to `caged`,
+  #     and `broker` does not need a network for Thread B at all — it talks
+  #     to `serve` over the `approve-sock` named volume (below), not TCP.
+  approve:
+    driver: bridge
 
 volumes:
   # Shared unix-socket carrier between the orchestrator and the broker. A named
@@ -558,6 +712,14 @@ volumes:
   # broker/src/reviewer.ts's INLINE_THRESHOLD_BYTES — small diffs skip this
   # volume entirely and go inline over the socket).
   review-diffs:
+  # Thread B: shared unix-socket carrier between the broker (listener,
+  # broker/src/approval-server.ts) and the OPTIONAL `serve` browser-approval
+  # UI (client) — same named-volume-vs-host-bind reasoning as broker-sock/
+  # worker-sock/reviewer-sock above. CRITICAL: mounted ONLY in `broker` and
+  # `serve` — see the `broker` service's BROKER_APPROVAL_SOCKET/volumes
+  # comments and docs/browser-approval.md's security invariants for why
+  # that must never change.
+  approve-sock:
   # NOTE: harness deps are NOT a named volume. A volume layered over the :ro
   # harness bind initializes itself from the HOST's node_modules (darwin
   # binaries, host-uid ownership → npm EACCES; hit live on the first M1 boot).

@@ -35,7 +35,15 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { GITHUB_TOKEN, WORKTREES_ROOT, loadPolicy, ticketFromWorktreesRoot } from "./config.js";
+import {
+  GITHUB_TOKEN,
+  TASKS_ROOT,
+  TICKETS_DIR,
+  WORKTREES_ROOT,
+  isTicketRegistered,
+  loadPolicy,
+  ticketFromWorktreesRoot,
+} from "./config.js";
 import type { Policy } from "./config.js";
 import { diffTouchesTests } from "./caveat.js";
 import { ApprovalHub } from "./gate.js";
@@ -77,6 +85,24 @@ function resolveWorktree(repo: string): string | null {
   const wt = path.resolve(WORKTREES_ROOT, repo);
   const rootWithSep = WORKTREES_ROOT.endsWith(path.sep) ? WORKTREES_ROOT : WORKTREES_ROOT + path.sep;
   if (wt !== WORKTREES_ROOT && !wt.startsWith(rootWithSep)) return null;
+  return wt;
+}
+
+/** Resolve a registered ticket's repo beneath its repositories directory and
+ *  prove lexical containment even though both components were schema-checked.
+ *  This duplicated boundary is intentional defense in depth (R2 memo). */
+export function resolveRoutedWorktree(ticket: string, repo: string, tasksRoot = TASKS_ROOT): string | null {
+  // Prove the TICKET segment's containment too, not just the repo's: callers
+  // do registry-validate the ticket first (handleRequest's ordering), but this
+  // function is exported as a standalone boundary and must not rely on that.
+  const tasksRootWithSep = tasksRoot.endsWith(path.sep) ? tasksRoot : tasksRoot + path.sep;
+  const ticketRoot = path.resolve(tasksRoot, ticket);
+  if (ticketRoot === path.resolve(tasksRoot) || !ticketRoot.startsWith(tasksRootWithSep)) return null;
+  if (path.dirname(ticketRoot) !== path.resolve(tasksRoot)) return null;
+  const reposRoot = path.resolve(ticketRoot, "repositories");
+  const wt = path.resolve(reposRoot, repo);
+  const rootWithSep = reposRoot.endsWith(path.sep) ? reposRoot : reposRoot + path.sep;
+  if (wt === reposRoot || !wt.startsWith(rootWithSep)) return null;
   return wt;
 }
 
@@ -131,11 +157,17 @@ export async function handleRequest(raw: unknown, signal?: AbortSignal): Promise
     return fail("config_missing", (e as Error).message);
   }
 
-  // 3. Bare repo resolving inside the worktrees root.
-  const wt = resolveWorktree(req.repo);
+  // 3. Routed claims must pass the operator registry BEFORE worktree probing;
+  //    this ordering prevents an unregistered request enumerating task trees.
+  if (req.ticket && !isTicketRegistered(req.ticket)) {
+    return fail("ticket_not_registered", `ticket '${req.ticket}' is not registered in ${TICKETS_DIR}`);
+  }
+  const attributionTicket = req.ticket ?? ticketFromWorktreesRoot();
+  const wt = req.ticket ? resolveRoutedWorktree(req.ticket, req.repo) : resolveWorktree(req.repo);
   if (!wt) return fail("repo_not_allowed", `repo '${req.repo}' resolves outside the worktrees root`);
   if (!worktreeExists(wt)) {
-    return fail("worktree_missing", `no worktree for '${req.repo}' under ${WORKTREES_ROOT}`);
+    const root = req.ticket ? path.resolve(TASKS_ROOT, req.ticket, "repositories") : WORKTREES_ROOT;
+    return fail("worktree_missing", `no worktree for '${req.repo}' under ${root}`);
   }
 
   // 4. The coder's .git config is UNTRUSTED — fail closed on any exec/redirect key
@@ -147,8 +179,18 @@ export async function handleRequest(raw: unknown, signal?: AbortSignal): Promise
   const actualBranch = currentBranch(wt);
   if (!actualBranch) return fail("worktree_missing", `cannot resolve HEAD for '${req.repo}'`);
   if (actualBranch === "HEAD") return fail("detached_head", `worktree '${req.repo}' is in detached HEAD state`);
+  if (req.ticket && actualBranch !== cfg.branch_prefix + req.ticket) {
+    return fail(
+      "branch_mismatch",
+      `request branch '${req.branch}', worktree branch '${actualBranch}', expected '${cfg.branch_prefix + req.ticket}' for ticket '${req.ticket}'`,
+    );
+  }
   if (actualBranch !== req.branch) {
-    return fail("branch_mismatch", `request branch '${req.branch}' != worktree branch '${actualBranch}'`);
+    let message = `request branch '${req.branch}' != worktree branch '${actualBranch}'`;
+    if (!req.ticket && req.branch.startsWith(cfg.branch_prefix) && !actualBranch.startsWith(cfg.branch_prefix)) {
+      message += `; is this broker pointed at the right worktrees dir? (BROKER_WORKTREES_DIR=${WORKTREES_ROOT}; per-ticket requests carry 'ticket')`;
+    }
+    return fail("branch_mismatch", message);
   }
   if (!actualBranch.startsWith(cfg.branch_prefix)) {
     return fail("branch_not_allowed", `branch '${actualBranch}' does not match branch_prefix '${cfg.branch_prefix}'`);
@@ -191,7 +233,13 @@ export async function handleRequest(raw: unknown, signal?: AbortSignal): Promise
     // SAME ground-truth diff the human is about to see — never the coder's
     // words. Any failure (env unset, unreachable, timeout, malformed reply)
     // returns null; this call NEVER throws into the publish path.
-    const reviewerVerdict = await maybeConsultReviewer(render.diff, req.title, req.body, signal);
+    const reviewerVerdict = await maybeConsultReviewer(
+      render.diff,
+      req.title,
+      req.body,
+      attributionTicket,
+      signal,
+    );
 
     // Thread C / Phase C2 (docs/mrw-chat.md "Gate policy" #4): computed on
     // the SAME ground-truth diff the human is about to see — never the
@@ -207,6 +255,7 @@ export async function handleRequest(raw: unknown, signal?: AbortSignal): Promise
       decision = await hub.decide(
         {
           repo: req.repo,
+          ticket: attributionTicket,
           branch: actualBranch,
           headSha: shaBefore,
           title: req.title,
@@ -222,7 +271,6 @@ export async function handleRequest(raw: unknown, signal?: AbortSignal): Promise
           reviewerVerdict,
           testCaveat,
           shortSha: shaBefore.slice(0, 12),
-          ticket: ticketFromWorktreesRoot(),
         },
         signal,
       );
@@ -244,6 +292,11 @@ export async function handleRequest(raw: unknown, signal?: AbortSignal): Promise
     if (signal?.aborted) {
       hub.reportOutcome({ ok: false, error: "aborted after approval, before push" });
       return { ok: false, code: "canceled", error: "aborted after approval, before push", sha: shaBefore };
+    }
+    if (req.ticket && !isTicketRegistered(req.ticket)) {
+      const error = `ticket '${req.ticket}' is no longer registered in ${TICKETS_DIR}; aborting`;
+      hub.reportOutcome({ ok: false, error });
+      return fail("ticket_not_registered", error);
     }
     const badNow = scanUntrustedLocalConfig(wt);
     if (badNow) {

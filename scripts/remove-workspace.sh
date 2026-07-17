@@ -17,6 +17,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib/effects/worktree.sh"
 # shellcheck source=lib/effects/cmux.sh
 . "$SCRIPT_DIR/lib/effects/cmux.sh"
+# shellcheck source=lib/effects/ticket-registry.sh
+. "$SCRIPT_DIR/lib/effects/ticket-registry.sh"
 
 TICKET_ID="${1:?usage: remove-workspace.sh <TICKET_ID> [--force]}"
 FORCE=false
@@ -76,6 +78,8 @@ fi
 
 info "Removing worktrees for $TICKET_ID"
 remove_worktrees "$TICKET_ID"
+
+deregister_broker_ticket "$TICKET_ID"
 
 info "Deleting $TASK_DIR"
 rm -rf "$TASK_DIR"

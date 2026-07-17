@@ -1,8 +1,9 @@
 # `mrw` 化 計画・実行状況・実現方法
 
-> 作業ブランチ: **`feat/mrw`**（master 未マージ。一通り完了後にまとめて PR 予定）
+> 作業ブランチ: **`feat/mrw`**（PR #13 で a8d972b までは master マージ済み。
+> それ以降 = env-sanitize / pre-merge blockers / broker ticket routing が未マージ分）
 > 設計の正典: [docs/mrw-cli.md](docs/mrw-cli.md)（+ [.ja.md](docs/mrw-cli.ja.md)）
-> 最終更新: 2026-07-16
+> 最終更新: 2026-07-17
 
 ## 0. 概要（何を目指すか）
 
@@ -110,13 +111,35 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
     rebuild が必要** — allowlist は COPY 焼き込み）。
     既知の残 UX: chat-home volume 初回のみ CLI onboarding（テーマ/ログイン）
     の人間クリックスルーが必要。
-  - C4: 不変条件チェック + 独立レビュー + ライブ E2E
-- **feat/mrw pre-merge blockers（2026-07-16 独立レビュー）** — push-guard config の
-  canonicalize / triage leaf の姿勢修正 / telemetry 網 internal 検証。Thread C とは
-  独立のワークストリーム（マージ前に要修正）。
-- ~~**Thread B（ブラウザ承認 / `mrw serve`）**~~ — ✅ 完了（上の表参照）。残フォローアップ:
-  稼働中 broker コンテナは旧イメージのため、次回 `mrw infra-up --build` 後に
-  コンテナ内 broker での承認ライブ E2E を 1 回実施（ホスト側シムでは検証済み）。
+  - C4: ✅ ライブ E2E 完了（2026-07-17、ETE-1 → phase2-demo#4）— chat →
+    run_worker → tests green → plan → review approve → request_publish →
+    ブラウザ SHA ゲート（caveat バッジ・keep-alive 描画・resume レグ込み）→
+    実 push + PR。E2E でのみ発見できた 2 バグ: (1) `.mcp.json` の未展開
+    `${VAR}` プレースホルダを実クレデンシャルと誤認（FIXED `8c4570f`
+    env-sanitize）、(2) broker の worktree 参照が起動時 env 固定で
+    per-ticket publish 不能 → **broker ticket routing**（下記）として解決。
+    残: 最終独立レビュー（devcontainer-status 記録は item 11 で完了）。
+- **broker per-ticket routing（設計 → R4 ライブ検証まで完了 2026-07-17）** —
+  docs/broker-ticket-routing.md（独立レビュー SHIP-WITH-FIXES 全11件反映
+  `40f4b7f`）。R2 broker 実装 `dedaffd`（53/53）+ R3 送信側/レジストリ/配線
+  `b621372`（harness 173・shell 114）。R4 ライブ: RT-1（phase2-demo#5）+
+  RT-2（phase3-docs#2）を **broker 再作成なしで同一 broker から連続 publish**
+  （多重度 N 実証）; 未登録チケット socket プローブ 5 種; **F6
+  ゲート中登録解除 → 正しい SHA 承認でも fail-closed** を実機確認。
+  `BROKER_GITHUB_TOKEN` の export だけで複数チケット publish 可能に
+  （`BROKER_WORKTREES_DIR` の手動向け替え儀式は不要化・legacy 互換維持）。
+  R4 で判明した残ギャップ（別スライス候補）: workerd はスタック単一・
+  シングルフライトで並行チケットのステップが busy 競合し、**busy 拒否も
+  worker-run 予算を消費**する（RT-2 で 3/12 空費）; `run_tests` は
+  `npm test` 前提で package.json の無い docs リポジトリはゲート不能
+  （per-repo TEST_COMMAND 未対応。RT-2 は no-op test script 追加で回避）。
+- **feat/mrw pre-merge blockers（2026-07-16 独立レビュー）** — ✅ 修正済み・
+  コミット済み（`440da38`、全スイート検証後にランド）。push-guard config の
+  canonicalize / triage leaf の tool-less 化 / telemetry 網 internal 検証を完了。
+- ~~**Thread B（ブラウザ承認 / `mrw serve`）**~~ — ✅ 完了（上の表参照）。
+  残フォローアップも消化済み: 2026-07-17 の `infra-up --build` 後、C4
+  （ETE-1）と routing R4（RT-1/RT-2）でコンテナ内 broker のブラウザ承認
+  ライブ E2E を計3回実施（うち1回は F6 fail-closed の負系）。
 - **work_type → telemetry の per-ticket 配線** — 現状 stack 共有のため `MRW_WORK_TYPE`
   は stack 単位。per-ticket 帰属は別途要設計（telemetry の per-ticket 分離議論に接続）。
 - **master へのマージ（PR 作成）** — 一通り完了確認後。
@@ -143,8 +166,8 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
 
 ### triage leaf（Phase 2.4）
 - `harness/src/triage.ts` `runTriage(text, repos) → {work_type,title,repos,summary}`。
-  `runPlan` と同一の read-only posture（`READ_ONLY_TOOLS`+`DENY_MUTATION`+
-  `settingSources:[]`、repo cwd なし、text のみで分類）。
+  tool-less posture（全 built-in tool deny + `settingSources:[]`、不活性 cwd、
+  text のみで分類）。
 - `work_type` は検証済み enum、`repos` はコードで availableRepos との積集合に絞る。
 - `mrw task-up --from <link>`（ticket-source で取得）→ triage → title/repos 自動補完。
   **graceful degradation**: triage 失敗（auth/gh/API）でもタスク作成は止めない。

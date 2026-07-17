@@ -29,6 +29,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/lib/effects/cmux.sh"
 # shellcheck source=lib/effects/worktree.sh
 . "$SCRIPT_DIR/lib/effects/worktree.sh"
+# shellcheck source=lib/effects/ticket-registry.sh
+. "$SCRIPT_DIR/lib/effects/ticket-registry.sh"
 
 require_cmd git
 require_cmd jq
@@ -150,6 +152,8 @@ load_meta() {
 # generate_agent_settings <role: worker|orchestrator> <dest-file>
 generate_agent_settings() {
   local role="$1" dest="$2" template tmp
+  [ -n "${CONFIG_DIR:-}" ] || die "CONFIG_DIR must be set before generating agent settings"
+  # In legacy mode CONFIG_DIR equals WORKSPACE_ROOT/config, so this security pin intentionally duplicates the existing legacy pin.
   tmp="$(mktemp)"
   if [ "$SANDBOX" = "true" ]; then
     render_template "$WORKSPACE_ROOT/templates/task-$role/claude-settings.json" > "$tmp"
@@ -269,6 +273,7 @@ phase_finalize() {
       create_worktree "$r" "$TICKET_ID" "$BRANCH" "$PURPOSE"
     done
   fi
+  register_broker_ticket "$TICKET_ID"
 
   # --- task docs -----------------------------------------------------------
   if [ ! -f "$TASK_DIR/docs/task.md" ]; then

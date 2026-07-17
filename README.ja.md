@@ -57,6 +57,8 @@ Code セッション**を実行するための、Git リポジトリの形をし
 - [`cmux`](https://github.com/wandb/cmux) — 任意だが強く推奨
   (無い場合はクリップボードにフォールバックする単一セッションモードになります)
 
+ホスト側シェルスクリプトの ShellCheck 一括チェックは `bash scripts/shellcheck-all.sh` で実行できます。
+
 ## クイックスタート
 
 ```bash

@@ -329,9 +329,9 @@ services:
   # short-lived GitHub token in ITS env, NEVER the coder's. It reaches the coder
   # only through the shared `broker-sock` named volume (the typed socket). It
   # NEVER trusts the coder-writable worktree tree: policy comes from a
-  # broker-OWNED, tool_home file bind-mounted read-only at BROKER_POLICY_FILE
-  # (Phase 1: shared across workspaces, not baked into the image — see the
-  # broker service's volumes: below), git config is
+  # broker-OWNED, per-workspace config directory bind-mounted read-only at
+  # BROKER_POLICY_FILE (not baked into the image — see the broker service's
+  # volumes: below), git config is
   # isolated, and every push goes to a broker-constructed, allowlist-validated URL
   # from a broker-private scratch repo. The human approval gate is on THIS
   # container's stdin — attach a terminal to answer it (see docs/devcontainer-phase2.md).
@@ -363,12 +363,14 @@ services:
       # scripts/devcontainer-up.sh from config_dir(), or by the caller) picks
       # which workspace's broker-policy.json is bound; unset ⇒ ../config
       # (tool_home, byte-identical to Phase 1).
-      BROKER_POLICY_FILE: /etc/mrw-broker/policy.json
+      BROKER_POLICY_FILE: /etc/mrw-broker/config/broker-policy.json
       # The coder-writable worktrees the broker reads objects from (mounted :ro).
       # Overridable from the host shell — point at tasks/<TICKET>/repositories for
       # per-ticket work (NOTE: repositories/ is mounted :ro in the CODER, so a
       # coder-editable publish worktree must live under tasks/).
       BROKER_WORKTREES_DIR: ${BROKER_WORKTREES_DIR:-/workspaces/muti-repo-workspace/repositories}
+      BROKER_TASKS_DIR: /workspaces/muti-repo-workspace/tasks
+      BROKER_TICKETS_DIR: /etc/mrw-broker/tickets
       # The coder-writable tree the policy file must never live inside (F2 check).
       BROKER_CODER_TREE: /workspaces/muti-repo-workspace
       BROKER_SOCKET_PATH: /run/broker/publish.sock
@@ -407,11 +409,14 @@ services:
       # build (see broker.Dockerfile). The host's broker/src lives inside the
       # coder-writable workspace tree, so mounting it (even :ro) would let a
       # tampered source execute with the token on the next broker restart.
-      # The TRUSTED policy, however, is now bind-mounted (de-baked from the
-      # image so editing it needs no rebuild) — read-only, from the active
-      # config_dir (${MRW_CONFIG_DIR}, unset ⇒ ../config == tool_home, the
-      # Phase 1 layout):
-      - ${MRW_CONFIG_DIR:-../config}/broker-policy.json:/etc/mrw-broker/policy.json:ro
+      # The TRUSTED config directory is bind-mounted read-only at runtime.
+      # A directory bind follows atomic replacement of broker-policy.json;
+      # scripts/devcontainer-up.sh validates the file before Docker can create
+      # a missing bind source. MRW_CONFIG_DIR selects the active workspace.
+      - ${MRW_CONFIG_DIR:-../config}:/etc/mrw-broker/config:ro
+      # Host-owned open-ticket registry. The broker can observe entry
+      # create/delete through this read-only DIRECTORY bind but cannot write it.
+      - ${MRW_STATE_ROOT:-..}/broker-tickets:/etc/mrw-broker/tickets:ro
       # The shared socket named volume (also mounted in the coder).
       - broker-sock:/run/broker
       # M3: shared with the `reviewer` service. The broker holds the ONLY

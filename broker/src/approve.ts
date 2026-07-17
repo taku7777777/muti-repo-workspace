@@ -31,6 +31,7 @@ import type { ReviewerVerdict } from "./reviewer.js";
 
 export interface ApprovalView {
   repo: string; // the worktree directory name (request.repo)
+  ticket: string | null; // registered request ticket; null for legacy routing
   branch: string;
   headSha: string;
   title: string;
@@ -100,6 +101,7 @@ export function renderHeader(v: ApprovalView): string {
   lines.push("");
   lines.push("================ PUBLISH REQUEST (ground truth from git) ================");
   lines.push(`worktree:  ${v.repo}`);
+  if (v.ticket) lines.push(`ticket:  ${v.ticket}`);
   lines.push(`branch:    ${v.branch}`);
   lines.push(`sha:       ${v.headSha}`);
   lines.push("");

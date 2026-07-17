@@ -47,12 +47,11 @@ export type ApprovalRequest = z.infer<typeof ApprovalRequestSchema>;
 export type ApprovalChannel = "tty" | "socket";
 export type ApprovalDecision = "approved" | "declined" | "canceled";
 
-// Every field of the broker's ApprovalView (approve.ts), PLUS the two fields
-// only the wire protocol needs: shortSha (so serve/the page never has to
-// re-derive the sha-typed gate's exact comparison string) and ticket (so the
-// page can show a ticket chip). All strings are RAW here — serve, not the
-// broker, is responsible for HTML-escaping before it reaches a browser.
-export type ViewWire = ApprovalView & { shortSha: string; ticket: string | null };
+// Every field of the broker's ApprovalView (approve.ts), PLUS shortSha so
+// serve/the page never has to re-derive the sha-typed gate's exact comparison
+// string. ApprovalView itself carries the broker-selected ticket so the TTY and
+// browser surfaces necessarily share its provenance. All strings are RAW here.
+export type ViewWire = ApprovalView & { shortSha: string };
 
 export interface PendingWire {
   id: string; // 32 hex chars — crypto.randomBytes(16).toString("hex")

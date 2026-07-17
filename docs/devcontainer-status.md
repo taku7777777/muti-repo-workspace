@@ -184,7 +184,12 @@ Phase 0 self-check):
    field in its request to the reviewer (`reviewer/src/types.ts`'s
    `ReviewerRequestSchema`, `.strict()`-preserved, same bare-name regex),
    derived from the broker's OWN env, never the coder's request — so
-   role=reviewer sessions attribute to the right ticket too. Static
+   role=reviewer sessions attribute to the right ticket too. [AMENDED by
+   item 11 / docs/broker-ticket-routing.md: for ticket-ROUTED publish
+   requests the broker now attributes to the request's ticket, accepted
+   only after bare-name validation AND registry membership — the same
+   conditions under which it is willing to act on it; env derivation
+   remains the rule for legacy requests.] Static
    validation: `harness/test/telemetry.test.ts` (new, `ticketFromRepoDir`/
    `telemetryEnv` accept/reject) and `reviewer/test/types.test.ts` (new —
    the reviewer package had no test infra before this; wired with `tsx`,
@@ -207,6 +212,40 @@ Phase 0 self-check):
    role=spine uses the identical mechanism and will show at the next chat
    run). Fail-open verified: with the collector STOPPED, a full drive run
    completed normally with zero OTLP error lines in its output.
+
+11. Thread C chat frontend live E2E (C4) + broker per-ticket routing —
+   **BUILT + LIVE-VALIDATED 2026-07-17**. The C4 human-in-the-loop run
+   (ticket ETE-1) drove the full chat surface end-to-end for the first
+   time: interactive Claude Code → `mcp__spine__*` → worker RPC → tests →
+   plan/review → `request_publish` → `mrw serve` browser SHA gate → real
+   push + phase2-demo#4 (keep-alive progress rendering, `--resume` leg,
+   and the broker-computed tests-touched caveat all observed live). Two
+   defects only a live E2E could surface, both fixed same-day:
+   (a) Claude Code's `.mcp.json` `${VAR}` interpolation leaves the LITERAL
+   placeholder when the var is unset, and the bundled CLI's auth resolver
+   prefers a truthy-garbage `ANTHROPIC_API_KEY` over a valid OAuth token —
+   every spined plan/review failed "Invalid API key" while chat and
+   worker-RPC paths worked. Fix: `harness/src/spined/env-sanitize.ts`
+   deletes self-referential `${NAME}` values at both spined entry points
+   (unit-tested; the then-four chat-selfcheck probes never exercised
+   plan/review, which is why this survived them — probe 5, added with the
+   routing work, now exercises the publish contract). (b) The broker's worktree reference
+   (`BROKER_WORKTREES_DIR`) was a start-time env pin — multiplicity 1,
+   manual, and every historical publish had silently relied on the
+   operator pointing it at the right ticket before `up`. Fixed as
+   request-carried ticket routing + an operator-registered ticket registry
+   (docs/broker-ticket-routing.md — design reviewed SHIP-WITH-FIXES, all
+   11 findings incorporated; R2 `dedaffd`, R3 `b621372`). R4 live run:
+   RT-1 (phase2-demo#5) and RT-2 (phase3-docs#2) published through the
+   SAME broker with no recreate; five negative socket probes; and the F6
+   leg — deregistering RT-1 while its gate sat open made a CORRECT-sha
+   approval fail closed ("no longer registered; aborting", nothing
+   pushed). Follow-ups recorded (not blockers): workerd is stack-single/
+   single-flight so concurrent tickets contend (`workerd busy`) and busy
+   REFUSALS consume worker-run budget (RT-2 burned 3/12 on retries);
+   `run_tests` assumes `npm test` so a docs repo without package.json
+   cannot pass the gate (RT-2 worked around with a committed no-op test
+   script; per-repo TEST_COMMAND is future work).
 
 M1 first-boot friction found and fixed (all live, none static):
 - A named volume layered over the `:ro` harness bind initializes from the

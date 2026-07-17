@@ -45,14 +45,13 @@ COPY broker/src ./src
 
 # --- TRUSTED policy directory. The policy FILE itself is no longer baked in
 #     at build — it is bind-mounted read-only at container start from
-#     tool_home's config/broker-policy.json (see docker-compose.yml's broker
-#     service volumes:), so editing the policy no longer needs an image
-#     rebuild. Phase 1 caveat: this is tool_home config, shared across every
-#     workspace/state_root — per-state_root divergence is Phase 2. The mount
-#     point is created here (and left root-owned) so the runtime bind has
+#     active config_dir (see docker-compose.yml's broker service volumes:), so
+#     editing the policy no longer needs an image rebuild. MRW_CONFIG_DIR
+#     selects the per-workspace policy, with tool_home/config as the legacy
+#     fallback. The mount point is created here (and left root-owned) so the runtime bind has
 #     somewhere to land; it still lives OUTSIDE the coder-writable
 #     /workspaces mount, so the broker's F2 containment check accepts it. ---
-RUN install -d -m 0755 /etc/mrw-broker
+RUN install -d -m 0755 /etc/mrw-broker/config /etc/mrw-broker/tickets
 
 # The `node` user runs the broker and needs to write the tsx cache under /broker.
 # The baked src is then stripped of write bits (read-only even inside the

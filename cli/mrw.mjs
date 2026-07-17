@@ -23,10 +23,9 @@ const toolHome = path.resolve(
 );
 
 // ---------------------------------------------------------------------------
-// config_dir resolution — MUST agree with scripts/lib/common.sh's
-// config_dir()/config_mode() and .githooks/pre-push's own walk-up (see
-// common.sh's doc comment on config_dir — this is the SECURITY-relevant
-// push-org config the pre-push hook reads). Priority:
+// config_dir resolution — agrees with scripts/lib/common.sh. The pre-push
+// hook normally reads this canonical value from scoped git config; walk-up is
+// retained there and here for legacy/re-setup compatibility. Priority:
 //   1. $MRW_CONFIG_DIR if set and non-empty.
 //   2. the nearest ancestor .mrw/ directory (one that CONTAINS
 //      workspace.json), found by walking UP from process.cwd() to "/".
@@ -40,11 +39,48 @@ function underTasksSegment(dir) {
   return dir.split(path.sep).includes("tasks");
 }
 
+export function canonicalizePath(input) {
+  if (!path.isAbsolute(input)) throw new Error(`path must be absolute (got '${input}')`);
+  let candidate = input;
+  const missing = [];
+  while (true) {
+    try {
+      // Match canonicalize_path(): only an existing directory terminates the
+      // search. A regular file is part of the preserved suffix, even though
+      // realpathSync() itself would accept it.
+      if (fs.statSync(candidate).isDirectory()) {
+        const real = fs.realpathSync(candidate);
+        return path.join(real, ...missing);
+      }
+    } catch (err) {
+      if (err?.code !== "ENOENT" && err?.code !== "ENOTDIR") throw err;
+    }
+    const parent = path.dirname(candidate);
+    if (parent === candidate) throw new Error(`cannot canonicalize path '${input}'`);
+    const part = path.basename(candidate);
+    if (part === "..") {
+      throw new Error(`cannot canonicalize path with '..' in a missing suffix: '${input}'`);
+    }
+    if (part !== "." && part !== "") missing.unshift(part);
+    candidate = parent;
+  }
+}
+
+function validateConfigDir(dir) {
+  const canonical = canonicalizePath(dir);
+  if (underTasksSegment(canonical)) {
+    throw new Error(`refusing config directory under a 'tasks/' path segment (${canonical})`);
+  }
+  const workspaceConfig = path.join(canonical, "workspace.json");
+  if (fs.existsSync(workspaceConfig)) readJson(workspaceConfig);
+  return canonical;
+}
+
 function findAncestorConfigDir() {
   let d = process.cwd();
   while (d !== "/") {
     if (!underTasksSegment(d) && fs.existsSync(path.join(d, ".mrw", "workspace.json"))) {
-      return path.join(d, ".mrw");
+      return validateConfigDir(path.join(d, ".mrw"));
     }
     d = path.dirname(d);
   }
@@ -52,8 +88,9 @@ function findAncestorConfigDir() {
 }
 
 function resolveConfigDir() {
-  const legacyDir = path.join(toolHome, "config");
-  const dir = process.env.MRW_CONFIG_DIR || findAncestorConfigDir() || legacyDir;
+  const legacyDir = canonicalizePath(path.join(toolHome, "config"));
+  const rawDir = process.env.MRW_CONFIG_DIR || findAncestorConfigDir() || legacyDir;
+  const dir = validateConfigDir(rawDir);
   // Mode is determined by VALUE, not by which priority branch produced it —
   // mirrors scripts/lib/common.sh's _config_resolve(). This matters because
   // runScript() below always forwards MRW_CONFIG_DIR=configDir to every
@@ -81,7 +118,13 @@ function readJson(filePath) {
 // workspace mode ⇒ dirname(configDir) (the dir that HOLDS .mrw/); legacy
 // mode ⇒ toolHome.
 function resolveConfigBase() {
-  return configMode === "workspace" ? path.dirname(configDir) : toolHome;
+  return canonicalizePath(configMode === "workspace" ? path.dirname(configDir) : toolHome);
+}
+
+function composeProjectName() {
+  if (configMode === "legacy") return "mrw-phase0";
+  const digest = crypto.createHash("sha256").update(resolveConfigBase()).digest("hex").slice(0, 12);
+  return `mrw-${digest}`;
 }
 
 // resolveStateRoot — mirrors scripts/lib/common.sh `state_root()`:
@@ -90,7 +133,7 @@ function resolveConfigBase() {
 //   - if empty, default to resolveConfigBase() (toolHome in legacy mode —
 //     the historical, unconfigured layout)
 function resolveStateRoot() {
-  const cfg = readJson(WORKSPACE_CONFIG_PATH);
+  const cfg = fs.existsSync(WORKSPACE_CONFIG_PATH) ? readJson(WORKSPACE_CONFIG_PATH) : {};
   const sr = cfg.state_root || "";
   if (sr !== "") {
     if (!path.isAbsolute(sr)) {
@@ -99,9 +142,9 @@ function resolveStateRoot() {
       );
       process.exit(1);
     }
-    return sr;
+    return canonicalizePath(sr);
   }
-  return resolveConfigBase();
+  return canonicalizePath(resolveConfigBase());
 }
 
 // setStateRoot — write .state_root into config/workspace.json WITHOUT
@@ -153,11 +196,11 @@ function runScript(relativeScriptPath, argv, env, onSuccess) {
   handleSpawnResult(result, scriptPath, onSuccess);
 }
 
-function runCommand(cmd, argv) {
+function runCommand(cmd, argv, env = process.env) {
   const result = spawnSync(cmd, argv, {
     stdio: "inherit",
     cwd: toolHome,
-    env: { ...process.env, MRW_CONFIG_DIR: configDir },
+    env: { ...env, MRW_CONFIG_DIR: configDir, COMPOSE_PROJECT_NAME: composeProjectName() },
   });
   handleSpawnResult(result, cmd);
 }
@@ -200,7 +243,7 @@ Subcommands:
                                         scripts/lib/ticket-sources/<ticket_source>.sh;
                                         --body-file reads it from a local file
                                         instead. Unless --no-triage, a fetched
-                                        body is auto-triaged (bounded, read-only
+                                        body is auto-triaged (bounded, tool-less
                                         Claude classifier) to pre-fill --title/
                                         --repos; explicit flags always win.
   list [args...]                       exec scripts/list-task.sh
@@ -267,12 +310,13 @@ function cmdConfig(argv) {
     } else {
       console.log(`state_root set to: ${newValue}`);
     }
+    console.log("Re-run `mrw setup` to apply the change (re-bakes the git-config include).");
   }
 
-  const cfg = readJson(WORKSPACE_CONFIG_PATH);
+  const cfg = fs.existsSync(WORKSPACE_CONFIG_PATH) ? readJson(WORKSPACE_CONFIG_PATH) : {};
   const stateRoot = resolveStateRoot();
   const isDefault = (cfg.state_root || "") === "";
-  const repos = readJson(REPOS_CONFIG_PATH);
+  const repos = fs.existsSync(REPOS_CONFIG_PATH) ? readJson(REPOS_CONFIG_PATH) : { repositories: [] };
   const repoNames = (repos.repositories || []).map((r) => r.name);
 
   console.log(`toolHome:   ${toolHome}`);
@@ -282,6 +326,7 @@ function cmdConfig(argv) {
   console.log(
     `state_root: ${stateRoot} (${isDefault ? `default — unset in ${WORKSPACE_CONFIG_PATH}, == config base` : `external — set in ${WORKSPACE_CONFIG_PATH}`})`
   );
+  console.log(`compose_project: ${composeProjectName()}`);
   console.log(`repos:      ${repoNames.length ? repoNames.join(", ") : "(none)"}`);
 }
 
@@ -319,6 +364,10 @@ function buildTaskUpArgs(argv, defaults = {}) {
       // task-up always drives the full lifecycle; a caller-supplied --phase
       // would silently override that, so it is dropped rather than forwarded.
       console.error("warning: --phase is ignored by 'mrw task-up' (always runs --phase all)");
+      if (i + 1 >= argv.length) {
+        console.error("error: --phase requires a value");
+        process.exit(1);
+      }
       i++;
       continue;
     }
@@ -531,7 +580,20 @@ function runTriageStep(bodyText, availableRepos, credEnv) {
     console.error("warning: triage output did not match the expected shape — proceeding without triage.");
     return null;
   }
-  return parsed;
+  return {
+    ...parsed,
+    work_type: stripControlChars(parsed.work_type),
+    title: stripControlChars(parsed.title),
+    summary: stripControlChars(parsed.summary),
+    repos: parsed.repos.map(stripControlChars),
+  };
+}
+
+export function stripControlChars(value) {
+  return value
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "")
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
 }
 
 // deriveGithubIssueId — best-effort GH-<N> ticket ID from a github-issues
@@ -549,6 +611,10 @@ function deriveGithubIssueId(ref) {
 // cmdTaskUp — owns --from/--body-file/--no-triage, then delegates the rest
 // of argv (with triage-derived defaults) to buildTaskUpArgs.
 function cmdTaskUp(argvIn) {
+  if (argvIn.includes("-h") || argvIn.includes("--help")) {
+    console.log(USAGE);
+    process.exit(0);
+  }
   let fromRef = null;
   let bodyFile = null;
   let noTriage = false;
@@ -809,7 +875,12 @@ function cmdServeUp(argv) {
   // interpolation to resolve identically — legacy mode omits the var
   // entirely so the compose default takes over, byte-identical to before
   // Thread B existed.
-  const env = { ...process.env, MRW_SERVE_TOKEN: token, MRW_SERVE_PORT: String(port) };
+  const env = {
+    ...process.env,
+    MRW_SERVE_TOKEN: token,
+    MRW_SERVE_PORT: String(port),
+    COMPOSE_PROJECT_NAME: composeProjectName(),
+  };
   if (configMode === "workspace") {
     env.MRW_CONFIG_DIR = configDir;
   }
@@ -877,6 +948,7 @@ function cmdServeUrl(argv) {
 
   const idResult = spawnSync("docker", ["compose", "-f", COMPOSE_FILE, "ps", "-q", "serve"], {
     cwd: toolHome,
+    env: { ...process.env, COMPOSE_PROJECT_NAME: composeProjectName() },
     encoding: "utf8",
   });
   const containerId = (idResult.stdout || "").trim().split("\n")[0];
@@ -1008,4 +1080,16 @@ function main() {
   }
 }
 
-main();
+// realpathSync, not path.resolve: Node resolves the MAIN MODULE's symlinks
+// for import.meta.url, but argv[1] keeps the symlink path — so a symlinked
+// install (npm link's bin shim, or a hand-made PATH symlink) would compare
+// unequal and mrw would exit 0 having done NOTHING (found live: a stale
+// /opt/homebrew/bin/mrw no-op'ing three `mrw close` runs).
+function isMainModule() {
+  try {
+    return fs.realpathSync(process.argv[1] || "") === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+}
+if (isMainModule()) main();

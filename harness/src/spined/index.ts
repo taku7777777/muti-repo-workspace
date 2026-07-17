@@ -42,6 +42,7 @@ import { createExecutor } from "../spine/executor.js";
 import type { Executor } from "../spine/executor.js";
 import { LedgerLoadError, SpineLedger } from "../spine/ledger.js";
 import { parseSpinedArgs } from "./args.js";
+import { sanitizeUnexpandedEnvPlaceholders } from "./env-sanitize.js";
 import { acquireLock } from "./lock.js";
 import type { SpinedLock } from "./lock.js";
 import { guardStdoutForMcp } from "./stdio-guard.js";
@@ -95,6 +96,8 @@ export interface SpinedStartup {
  * startup failure modes (no ledger, lock contention) directly.
  */
 export async function startSpined(argv: string[], opts?: { root?: string }): Promise<SpinedStartup> {
+  sanitizeUnexpandedEnvPlaceholders(process.env, ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"]);
+
   // Same fail-closed credential guard as spine/index.ts's / workerd/index.ts's
   // cli()s: a dispatched run_worker/plan_repo/review_diff calls the Agent SDK
   // directly whenever WORKERD_SOCKET is unset (exec.ts's mode switch), so

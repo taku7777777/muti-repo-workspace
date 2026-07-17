@@ -33,7 +33,6 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 import { z } from "zod";
-import { ticketFromWorktreesRoot } from "./config.js";
 
 export interface ReviewerVerdict {
   verdict: "approve" | "concerns";
@@ -139,6 +138,7 @@ export async function maybeConsultReviewer(
   diff: string,
   title: string,
   body: string,
+  ticket: string | null,
   signal?: AbortSignal,
 ): Promise<ReviewerVerdict | "unavailable" | null> {
   const socketPath = process.env.REVIEWER_SOCKET;
@@ -149,12 +149,9 @@ export async function maybeConsultReviewer(
   let diffFile: string | null = null;
 
   try {
-    // Derived from the broker's OWN env (WORKTREES_ROOT), never from
-    // anything the publish request itself carries — same self-derivation
-    // posture as harness/src/telemetry.ts. Omitted (not sent as undefined)
-    // when null, so a legacy/single-repo deployment's request shape is
-    // byte-identical to pre-telemetry behavior.
-    const ticket = ticketFromWorktreesRoot();
+    // The handler supplies one attribution value: env-derived for legacy
+    // requests, or schema-validated + registry-confirmed for routed requests.
+    // Omit it when null so legacy single-repo wire behavior stays identical.
     let req: unknown;
     if (diffBytes <= INLINE_THRESHOLD_BYTES) {
       req = { diffInline: diff, title, untrustedBody: body, ...(ticket ? { ticket } : {}) };

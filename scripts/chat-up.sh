@@ -32,8 +32,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$SCRIPT_DIR/lib/common.sh"
+COMPOSE_PROJECT_NAME="$(compose_project_name)" || die "cannot resolve the compose project name (broken workspace config?)"
+export COMPOSE_PROJECT_NAME
 # shellcheck source=lib/effects/cmux.sh
 . "$SCRIPT_DIR/lib/effects/cmux.sh"
+# shellcheck source=lib/effects/ticket-registry.sh
+. "$SCRIPT_DIR/lib/effects/ticket-registry.sh"
 
 require_cmd docker
 require_cmd jq
@@ -164,6 +168,12 @@ if $RESUME; then
   [ -f "$CHAT_DIR/.claude/settings.json" ] \
     || die "--resume: no rendered chat config at $CHAT_DIR/.claude/settings.json — run 'mrw chat $TICKET_ID' first (without --resume)."
   info "Resuming chat for $TICKET_ID (reusing the existing rendered config at $CHAT_DIR — not re-rendering, not re-preparing)."
+  # Idempotent re-registration: a ticket opened BEFORE the broker ticket
+  # registry existed (pre-R3) has a live worktree/ledger but no registry
+  # entry, and resume is its only re-entry point (spine-prepare refuses a
+  # non-resume re-run) — without this its routed publish dead-ends in
+  # ticket_not_registered with no exposed remediation.
+  register_broker_ticket "$TICKET_ID"
 else
   # --- resolve repos / purpose / model / work_type for this render ---------
   REPOS_CSV=""
@@ -288,6 +298,7 @@ else
     rm -rf "$CHAT_DIR"
     die "spine-prepare failed — removed the incomplete render at $CHAT_DIR (see the prepare output above for the cause; re-run 'mrw chat $TICKET_ID' once it's fixed — NOT --resume, nothing was prepared)."
   fi
+  register_broker_ticket "$TICKET_ID"
 fi
 
 # ---------------------------------------------------------------------------
@@ -331,7 +342,7 @@ dc exec -T \
 # (cmux_workspace_uuid_by_name). Degrades to printing (and, on macOS,
 # clipboard-copying) the command when cmux is absent — same fallback shape as
 # create-workspace.sh's own worker/orchestrator startup.
-CHAT_CMD_PRINTABLE="docker compose -f $(printf '%q' "$COMPOSE_FILE") exec -it -e CLAUDE_CONFIG_DIR=$CONTAINER_CHAT_HOME -w $(printf '%q' "$CONTAINER_CHAT_DIR") orchestrator claude"
+CHAT_CMD_PRINTABLE="docker compose -p $(printf '%q' "$COMPOSE_PROJECT_NAME") -f $(printf '%q' "$COMPOSE_FILE") exec -it -e CLAUDE_CONFIG_DIR=$CONTAINER_CHAT_HOME -w $(printf '%q' "$CONTAINER_CHAT_DIR") orchestrator claude"
 if $RESUME; then
   CHAT_CMD_PRINTABLE="$CHAT_CMD_PRINTABLE --continue"
 fi

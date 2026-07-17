@@ -29,6 +29,23 @@ validate_ticket_id "$TICKET_ID"
 
 WORKSPACE_ROOT="$(workspace_root)"
 STATE_ROOT="$(state_root)"
+CONFIG_DIR="$(config_dir)"
+
+# Reject config writes before looking up the task. The push allowlist lives in
+# config_dir and must remain outside every task's writable boundary.
+if [ "$ACTION" = "--add-write" ]; then
+  [ -n "$VALUE" ] || die "--add-write needs an absolute path"
+  case "$VALUE" in /*) : ;; *) die "--add-write path must be absolute" ;; esac
+  canon="$(canonicalize_path "$VALUE")"
+  cfg="$(canonicalize_path "$CONFIG_DIR")"
+  if [ "$canon" = "$cfg" ]; then
+    die "refusing --add-write into the workspace config directory ($cfg) — the push allowlist must not be writable from a task"
+  fi
+  case "$canon/" in
+    "$cfg"/*) die "refusing --add-write into the workspace config directory ($cfg) — the push allowlist must not be writable from a task" ;;
+  esac
+fi
+
 SETTINGS="$STATE_ROOT/tasks/$TICKET_ID/agents/worker/.claude/settings.json"
 [ -f "$SETTINGS" ] || die "no worker settings for task $TICKET_ID"
 
@@ -76,10 +93,8 @@ case "$ACTION" in
     info "added ask rule: $VALUE"
     ;;
   --add-write)
-    [ -n "$VALUE" ] || die "--add-write needs an absolute path"
-    case "$VALUE" in /*) : ;; *) die "--add-write path must be absolute" ;; esac
-    apply '.sandbox.filesystem.allowWrite = ((.sandbox.filesystem.allowWrite // []) + [$v] | unique)' --arg v "$VALUE"
-    info "added write scope: $VALUE"
+    apply '.sandbox.filesystem.allowWrite = ((.sandbox.filesystem.allowWrite // []) + [$v] | unique)' --arg v "$canon"
+    info "added write scope: $canon"
     ;;
   --add-git-access)
     # Lets the sandboxed worker run git fetch/pull against remotes: read

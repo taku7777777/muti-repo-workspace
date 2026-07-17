@@ -50,9 +50,14 @@ import { stateDir } from "../multi/state.js";
 import type { RepoConfig } from "../multi/types.js";
 import { SpineLedger } from "../spine/ledger.js";
 import { parseSpinedArgs } from "./args.js";
+import { sanitizeUnexpandedEnvPlaceholders } from "./env-sanitize.js";
 import { isLockPotentiallyLive } from "./lock.js";
 
 export async function prepare(argv: string[], opts?: { root?: string }): Promise<number> {
+  // spine-prepare is its own CLI entry point, so it cannot rely on spined's
+  // startup path having already cleaned the shared process environment.
+  sanitizeUnexpandedEnvPlaceholders(process.env, ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"]);
+
   // Same fail-closed credential guard as spine/index.ts's cli(): worktree
   // setup itself needs no credential, but a prepared-then-immediately-used
   // daemon would fail on its very first run_worker/plan_repo/review_diff

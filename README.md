@@ -55,6 +55,8 @@ allowlisted scripts — never general shell.
 - [`cmux`](https://github.com/wandb/cmux) — optional but strongly recommended
   (without it you get clipboard-fallback single-session mode)
 
+Run `bash scripts/shellcheck-all.sh` for a local ShellCheck pass over the host scripts.
+
 ## Quick start
 
 ```bash

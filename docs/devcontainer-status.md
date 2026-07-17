@@ -184,7 +184,12 @@ Phase 0 self-check):
    field in its request to the reviewer (`reviewer/src/types.ts`'s
    `ReviewerRequestSchema`, `.strict()`-preserved, same bare-name regex),
    derived from the broker's OWN env, never the coder's request — so
-   role=reviewer sessions attribute to the right ticket too. Static
+   role=reviewer sessions attribute to the right ticket too. [AMENDED by
+   item 11 / docs/broker-ticket-routing.md: for ticket-ROUTED publish
+   requests the broker now attributes to the request's ticket, accepted
+   only after bare-name validation AND registry membership — the same
+   conditions under which it is willing to act on it; env derivation
+   remains the rule for legacy requests.] Static
    validation: `harness/test/telemetry.test.ts` (new, `ticketFromRepoDir`/
    `telemetryEnv` accept/reject) and `reviewer/test/types.test.ts` (new —
    the reviewer package had no test infra before this; wired with `tsx`,
@@ -222,8 +227,9 @@ Phase 0 self-check):
    every spined plan/review failed "Invalid API key" while chat and
    worker-RPC paths worked. Fix: `harness/src/spined/env-sanitize.ts`
    deletes self-referential `${NAME}` values at both spined entry points
-   (unit-tested; the four chat-selfcheck probes never exercise plan/review,
-   which is why this survived them). (b) The broker's worktree reference
+   (unit-tested; the then-four chat-selfcheck probes never exercised
+   plan/review, which is why this survived them — probe 5, added with the
+   routing work, now exercises the publish contract). (b) The broker's worktree reference
    (`BROKER_WORKTREES_DIR`) was a start-time env pin — multiplicity 1,
    manual, and every historical publish had silently relied on the
    operator pointing it at the right ticket before `up`. Fixed as

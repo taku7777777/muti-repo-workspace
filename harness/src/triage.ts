@@ -48,6 +48,10 @@ export function filterToAvailableRepos(repos: string[], availableRepos: string[]
 export const TRIAGE_TOOLS: string[] = [];
 export const TRIAGE_DENY_ALL_BUILTINS = [
   "Edit", "Write", "Bash", "NotebookEdit", "WebFetch", "WebSearch", "Read", "Grep", "Glob",
+  // Task (subagent spawn) too: tools:[] should already exclude it, but this
+  // codebase's own #115 note shows tool-restriction semantics have drifted
+  // across SDK versions — denying the spawn tool is free insurance.
+  "Task",
 ];
 export function createTriageCwd(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "mrw-triage-"));

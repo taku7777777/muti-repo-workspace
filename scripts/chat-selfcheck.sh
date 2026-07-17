@@ -69,7 +69,8 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$SCRIPT_DIR/lib/common.sh"
-export COMPOSE_PROJECT_NAME="$(compose_project_name)"
+COMPOSE_PROJECT_NAME="$(compose_project_name)" || die "cannot resolve the compose project name (broken workspace config?)"
+export COMPOSE_PROJECT_NAME
 
 FAIL=0
 pass() { printf 'PASS: %s\n' "$1"; }
@@ -277,6 +278,9 @@ const req = {
   ticket: process.argv[1],
 };
 const socket = net.createConnection({ path: process.env.BROKER_SOCKET });
+// Fail-closed timeout: a broker that accepts but never replies must fail the
+// probe, not hang the whole selfcheck. 30s is generous for a registry check.
+socket.setTimeout(30000, () => { console.error("probe timed out after 30s"); socket.destroy(); process.exitCode = 2; });
 let buf = "";
 socket.setEncoding("utf8");
 socket.on("connect", () => socket.write(JSON.stringify(req) + "\n"));

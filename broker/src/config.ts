@@ -84,11 +84,31 @@ export const TICKETS_DIR = path.resolve(
 
 /** Exact registry membership check (docs/broker-ticket-routing.md, finding 4).
  *  Validate before any path use, enumerate for a case-sensitive `===` match,
- *  then reject anything except a regular file. Content is never read. */
+ *  then reject anything except a regular file. Content is never read.
+ *
+ *  F2-style containment (same misconfiguration class the policy check guards
+ *  against): the registry is the operator's routing kill-switch, so a
+ *  BROKER_TICKETS_DIR that resolves inside a CODER-WRITABLE tree
+ *  (TASKS_ROOT / WORKTREES_ROOT) would hand registration to the coder —
+ *  refuse (fail-closed: reads as not-registered). Deliberately narrower than
+ *  loadPolicy()'s whole-CODER_TREE refusal: a host-run legacy-layout broker
+ *  keeps state_root/broker-tickets as a SIBLING of tasks/ inside the
+ *  workspace checkout, which is operator-owned there — only the trees the
+ *  coder can actually write are off-limits. */
+function ticketsDirIsCoderWritable(ticketsDir: string): boolean {
+  const resolved = path.resolve(ticketsDir);
+  for (const writable of [TASKS_ROOT, WORKTREES_ROOT]) {
+    const root = writable.endsWith(path.sep) ? writable : writable + path.sep;
+    if (resolved === writable || resolved.startsWith(root)) return true;
+  }
+  return false;
+}
+
 export function isTicketRegistered(ticket: string, ticketsDir = TICKETS_DIR): boolean {
   if (!SAFE_TICKET.test(ticket) || ticket === "." || ticket === ".." || ticket.includes("..")) {
     return false;
   }
+  if (ticketsDirIsCoderWritable(ticketsDir)) return false;
   try {
     const exact = fs.readdirSync(ticketsDir).find((entry) => entry === ticket);
     if (exact === undefined) return false;

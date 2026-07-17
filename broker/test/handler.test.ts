@@ -36,13 +36,25 @@ test("unregistered routed ticket fails before an absent worktree can be observed
 test("routed resolver enforces lexical containment", () => {
   assert.equal(resolveRoutedWorktree("T-1", "app", tasks), path.join(tasks, "T-1", "repositories", "app"));
   assert.equal(resolveRoutedWorktree("T-1", "../escape", tasks), null);
+  // The TICKET segment is contained in-function too (defense in depth — the
+  // function must not rely on callers having registry-validated it first).
+  assert.equal(resolveRoutedWorktree("../escape", "app", tasks), null);
+  assert.equal(resolveRoutedWorktree(".", "app", tasks), null);
+  assert.equal(resolveRoutedWorktree("a/b", "app", tasks), null);
 });
 
 test("routed branch is bound exactly to branch_prefix + ticket", async () => {
   fs.writeFileSync(path.join(tickets, "T-1"), "");
   const wt = path.join(tasks, "T-1", "repositories", "app");
   fs.mkdirSync(wt, { recursive: true });
-  const git = (args: string[]) => spawnSync("git", args, { cwd: wt, encoding: "utf8" });
+  // Isolate from the developer's real git config — a machine-global
+  // commit.gpgsign=true (or similar) must not fail the suite.
+  const git = (args: string[]) =>
+    spawnSync("git", args, {
+      cwd: wt,
+      encoding: "utf8",
+      env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+    });
   assert.equal(git(["init", "-b", "feat/OTHER"]).status, 0);
   fs.writeFileSync(path.join(wt, "README.md"), "x\n");
   assert.equal(git(["add", "README.md"]).status, 0);

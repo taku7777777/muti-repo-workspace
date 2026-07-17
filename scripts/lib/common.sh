@@ -147,11 +147,20 @@ config_base() {
 
 # compose_project_name — keep the historical Compose identity in legacy mode,
 # while isolating containers and named volumes for each per-workspace config.
+# Guarded captures: config_mode/config_base dying inside `$()`/`if` contexts
+# would otherwise degrade to hashing the empty string ('mrw-e3b0c44298fc',
+# exit 0) — a wrong-but-plausible project name aimed at nonexistent
+# containers. Callers must ALSO use a split assignment
+# (`VAR="$(compose_project_name)" || die; export VAR`) — `export VAR="$(…)"`
+# masks the exit status (SC2155).
 compose_project_name() {
-  if [ "$(config_mode)" = "legacy" ]; then
+  local mode base
+  mode="$(config_mode)" || return $?
+  if [ "$mode" = "legacy" ]; then
     printf 'mrw-phase0'
   else
-    printf 'mrw-%s' "$(printf '%s' "$(config_base)" | shasum -a 256 | cut -c1-12)"
+    base="$(config_base)" || return $?
+    printf 'mrw-%s' "$(printf '%s' "$base" | shasum -a 256 | cut -c1-12)"
   fi
 }
 

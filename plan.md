@@ -1,8 +1,9 @@
 # `mrw` 化 計画・実行状況・実現方法
 
-> 作業ブランチ: **`feat/mrw`**（master 未マージ。一通り完了後にまとめて PR 予定）
+> 作業ブランチ: **`feat/mrw`**（PR #13 で a8d972b までは master マージ済み。
+> それ以降 = env-sanitize / pre-merge blockers / broker ticket routing が未マージ分）
 > 設計の正典: [docs/mrw-cli.md](docs/mrw-cli.md)（+ [.ja.md](docs/mrw-cli.ja.md)）
-> 最終更新: 2026-07-16
+> 最終更新: 2026-07-17
 
 ## 0. 概要（何を目指すか）
 
@@ -117,7 +118,7 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
     `${VAR}` プレースホルダを実クレデンシャルと誤認（FIXED `8c4570f`
     env-sanitize）、(2) broker の worktree 参照が起動時 env 固定で
     per-ticket publish 不能 → **broker ticket routing**（下記）として解決。
-    残: 最終独立レビュー + devcontainer-status 記録。
+    残: 最終独立レビュー（devcontainer-status 記録は item 11 で完了）。
 - **broker per-ticket routing（設計 → R4 ライブ検証まで完了 2026-07-17）** —
   docs/broker-ticket-routing.md（独立レビュー SHIP-WITH-FIXES 全11件反映
   `40f4b7f`）。R2 broker 実装 `dedaffd`（53/53）+ R3 送信側/レジストリ/配線
@@ -135,9 +136,10 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
 - **feat/mrw pre-merge blockers（2026-07-16 独立レビュー）** — ✅ 修正済み・
   コミット済み（`440da38`、全スイート検証後にランド）。push-guard config の
   canonicalize / triage leaf の tool-less 化 / telemetry 網 internal 検証を完了。
-- ~~**Thread B（ブラウザ承認 / `mrw serve`）**~~ — ✅ 完了（上の表参照）。残フォローアップ:
-  稼働中 broker コンテナは旧イメージのため、次回 `mrw infra-up --build` 後に
-  コンテナ内 broker での承認ライブ E2E を 1 回実施（ホスト側シムでは検証済み）。
+- ~~**Thread B（ブラウザ承認 / `mrw serve`）**~~ — ✅ 完了（上の表参照）。
+  残フォローアップも消化済み: 2026-07-17 の `infra-up --build` 後、C4
+  （ETE-1）と routing R4（RT-1/RT-2）でコンテナ内 broker のブラウザ承認
+  ライブ E2E を計3回実施（うち1回は F6 fail-closed の負系）。
 - **work_type → telemetry の per-ticket 配線** — 現状 stack 共有のため `MRW_WORK_TYPE`
   は stack 単位。per-ticket 帰属は別途要設計（telemetry の per-ticket 分離議論に接続）。
 - **master へのマージ（PR 作成）** — 一通り完了確認後。

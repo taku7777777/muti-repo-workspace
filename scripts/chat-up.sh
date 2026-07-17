@@ -32,7 +32,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$SCRIPT_DIR/lib/common.sh"
-export COMPOSE_PROJECT_NAME="$(compose_project_name)"
+COMPOSE_PROJECT_NAME="$(compose_project_name)" || die "cannot resolve the compose project name (broken workspace config?)"
+export COMPOSE_PROJECT_NAME
 # shellcheck source=lib/effects/cmux.sh
 . "$SCRIPT_DIR/lib/effects/cmux.sh"
 # shellcheck source=lib/effects/ticket-registry.sh
@@ -167,6 +168,12 @@ if $RESUME; then
   [ -f "$CHAT_DIR/.claude/settings.json" ] \
     || die "--resume: no rendered chat config at $CHAT_DIR/.claude/settings.json — run 'mrw chat $TICKET_ID' first (without --resume)."
   info "Resuming chat for $TICKET_ID (reusing the existing rendered config at $CHAT_DIR — not re-rendering, not re-preparing)."
+  # Idempotent re-registration: a ticket opened BEFORE the broker ticket
+  # registry existed (pre-R3) has a live worktree/ledger but no registry
+  # entry, and resume is its only re-entry point (spine-prepare refuses a
+  # non-resume re-run) — without this its routed publish dead-ends in
+  # ticket_not_registered with no exposed remediation.
+  register_broker_ticket "$TICKET_ID"
 else
   # --- resolve repos / purpose / model / work_type for this render ---------
   REPOS_CSV=""

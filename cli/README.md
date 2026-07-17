@@ -76,10 +76,10 @@ works the same from any cwd.
 | Subcommand | Action |
 |---|---|
 | `mrw help` / `-h` / `--help` / no args | print usage |
-| `mrw config` | print resolved `toolHome`, `config_dir` (+ workspace/legacy mode), `state_root`, and repo names from `config_dir/repos.json` |
+| `mrw config` | print resolved `toolHome`, `config_dir` (+ workspace/legacy mode), `state_root`, `compose_project` (the Compose project name for this workspace), and repo names from `config_dir/repos.json` |
 | `mrw config --state-root <abs>` | set `.state_root` in `config_dir/workspace.json` (absolute path required) |
 | `mrw config --state-root ""` | clear `.state_root` back to the default (workspace base — `toolHome` in legacy mode) |
-| `mrw init [dir]` | scaffold a new per-workspace `.mrw/` in `[dir]` (default cwd): copies `workspace.json`, `repos.json`, `purposes/`, `broker-policy.json` from `<toolHome>/config` as a starting point. Refuses if `<dir>/.mrw/` already exists. Prints next steps (edit `repos.json`/`allowed_push_orgs`, then `mrw setup`). |
+| `mrw init [dir]` | scaffold a new per-workspace `.mrw/` in `[dir]` (default cwd): copies `workspace.json`, `repos.json`, `purposes/`, `broker-policy.json`, `serve.json` (+ `serve.css` if present) from `<toolHome>/config` as a starting point. Refuses if `<dir>/.mrw/` already exists. Prints next steps (edit `repos.json`/`allowed_push_orgs`, then `mrw setup`). |
 | `mrw setup [args...]` | exec `scripts/setup-workspace.sh` (e.g. `--skip-clone`, `--dry-run`) |
 | `mrw infra-up [args...]` | exec `scripts/devcontainer-up.sh` (args forwarded to `docker compose up`) |
 | `mrw infra-down [args...]` | `docker compose -f .devcontainer/docker-compose.yml down` from `toolHome` |

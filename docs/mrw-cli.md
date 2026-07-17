@@ -132,8 +132,14 @@ changes here** — it has *no* workspace mount at all; everything it runs is bak
 into its image, and it sees only its socket and `review-diffs:ro`.) `mrw
 infra-up` **generates** the compose (or a compose + override) with absolute
 paths from config; the hand-maintained relative compose goes away.
-`BROKER_WORKTREES_DIR` is pinned by `mrw` per task to
-`${workspaceRoot}/tasks/<T>/repositories`.
+~~`BROKER_WORKTREES_DIR` is pinned by `mrw` per task to
+`${workspaceRoot}/tasks/<T>/repositories`.~~ **SUPERSEDED (2026-07-17)**: this
+per-task env pinning was option (b) of docs/broker-ticket-routing.md, which
+rejected it (multiplicity stays 1; re-pinning drops other tickets' pending
+approvals). Built instead: request-carried ticket routing + an
+operator-registered ticket registry — no `BROKER_WORKTREES_DIR` override
+needed for per-ticket publishes (the env stays as the legacy/no-ticket
+fallback).
 
 Two more host-relative things the generator must rewrite, easy to miss because
 they are not `volumes:` binds:

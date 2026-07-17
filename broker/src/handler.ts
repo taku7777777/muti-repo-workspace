@@ -92,7 +92,14 @@ function resolveWorktree(repo: string): string | null {
  *  prove lexical containment even though both components were schema-checked.
  *  This duplicated boundary is intentional defense in depth (R2 memo). */
 export function resolveRoutedWorktree(ticket: string, repo: string, tasksRoot = TASKS_ROOT): string | null {
-  const reposRoot = path.resolve(tasksRoot, ticket, "repositories");
+  // Prove the TICKET segment's containment too, not just the repo's: callers
+  // do registry-validate the ticket first (handleRequest's ordering), but this
+  // function is exported as a standalone boundary and must not rely on that.
+  const tasksRootWithSep = tasksRoot.endsWith(path.sep) ? tasksRoot : tasksRoot + path.sep;
+  const ticketRoot = path.resolve(tasksRoot, ticket);
+  if (ticketRoot === path.resolve(tasksRoot) || !ticketRoot.startsWith(tasksRootWithSep)) return null;
+  if (path.dirname(ticketRoot) !== path.resolve(tasksRoot)) return null;
+  const reposRoot = path.resolve(ticketRoot, "repositories");
   const wt = path.resolve(reposRoot, repo);
   const rootWithSep = reposRoot.endsWith(path.sep) ? reposRoot : reposRoot + path.sep;
   if (wt === reposRoot || !wt.startsWith(rootWithSep)) return null;

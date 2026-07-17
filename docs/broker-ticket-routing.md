@@ -177,7 +177,11 @@ name the broker rebuild as an explicit operator step.
   same recipe as chat-up.sh's `refuse_if_under_tasks_segment`).
 - **Lifecycle**: `mrw close` is the single deregistration point for BOTH task
   and chat tickets (chat tickets live under `tasks/<T>` and are closed the
-  same way). Deregistration tolerates a missing entry (pre-feature tasks). An
+  same way). Deregistration tolerates a missing entry (pre-feature tasks).
+  `mrw chat --resume` re-registers idempotently — the remediation path for a
+  ticket opened BEFORE the registry existed (post-implementation review
+  finding: resume is such a ticket's only re-entry point, since
+  spine-prepare refuses a non-resume re-run). An
   abandoned-but-unclosed chat ticket staying routable is correct by
   definition — the registry mirrors "opened by the operator and not yet
   closed", nothing narrower (review finding 5). A stale entry whose worktree
@@ -229,8 +233,9 @@ the LLM never types it:
 attribution source for legacy requests. For ticket-carrying requests, the
 broker attributes to the **validated + registered** request ticket — this
 amends the invariant "the broker derives ticket from ITS OWN env, never the
-coder's request" (docs/devcontainer-status.md item 10, docs/
-agent-orchestration.md) to: "…never from an **unvalidated** request value; a
+coder's request" (docs/devcontainer-status.md item 10 — the invariant's only
+home; item 10 now carries an AMENDED-by-item-11 annotation) to: "…never from
+an **unvalidated** request value; a
 ticket claim is accepted for attribution only after bare-name validation AND
 registry membership, the same conditions under which the broker is willing to
 *act* on it." The reviewer-consult `ticket` field forwarding keeps the same

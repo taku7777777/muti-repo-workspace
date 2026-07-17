@@ -177,6 +177,11 @@ credential 不在のアサーションは Phase 0 セルフチェックで live 
    `ReviewerRequestSchema`。`.strict()` は維持、同じ bare-name 正規表現)。
    これは broker 自身の env から導出され、coder のリクエストからではない
    ため、role=reviewer のセッションも正しいチケットに attribution される。
+   [item 11 / docs/broker-ticket-routing.md により**修正**: ticket
+   ルーティングされた publish リクエストについては、broker はリクエストの
+   ticket に帰属させる — ただし bare-name 検証とレジストリ所属の両方を
+   通過した場合のみ（broker がそれに基づいて行動するのと同一の条件）。
+   legacy リクエストでは env 導出がルールのまま。]
    静的検証: `harness/test/telemetry.test.ts`(新規、`ticketFromRepoDir`/
    `telemetryEnv` の accept/reject)と `reviewer/test/types.test.ts`
    (新規 — reviewer パッケージにはこれまでテスト基盤が無かった。`tsx` が
@@ -201,6 +206,40 @@ credential 不在のアサーションは Phase 0 セルフチェックで live 
    role=spine は同一メカニズムのため次回の chat 実行で現れる)。fail-open
    も検証済み: collector を**停止**した状態でも drive の1周は OTLP エラー
    出力ゼロで正常完走した。
+
+11. Thread C chat フロントエンドのライブ E2E(C4)+ broker per-ticket
+   ルーティング — **実装済み + ライブ検証済み 2026-07-17**。C4 の
+   human-in-the-loop 実走(チケット ETE-1)が chat サーフェスを初めて
+   端から端まで通した: 対話 Claude Code → `mcp__spine__*` → worker RPC →
+   tests → plan/review → `request_publish` → `mrw serve` ブラウザ SHA
+   ゲート → 実 push + phase2-demo#4(keep-alive 進捗描画、`--resume`
+   レグ、broker 算出の tests-touched caveat をすべて実機で観測)。ライブ
+   E2E でしか炙り出せない欠陥を2件発見、いずれも同日修正:
+   (a) Claude Code の `.mcp.json` `${VAR}` 展開は、変数が未設定のとき
+   **リテラルのプレースホルダ文字列を残し**、バンドル CLI の認証リゾルバは
+   truthy なゴミの `ANTHROPIC_API_KEY` を正当な OAuth トークンより優先する
+   — spined の plan/review がすべて "Invalid API key" で落ちる一方、chat と
+   worker-RPC 経路は動き続けた。修正: `harness/src/spined/env-sanitize.ts`
+   が spined の両エントリポイントで自己参照 `${NAME}` 値を削除する
+   (ユニットテスト済み。当時4つだった chat-selfcheck プローブは
+   plan/review を叩いておらず、だから素通りした — ルーティング対応で
+   追加されたプローブ5が publish 契約を叩くようになった)。
+   (b) broker の worktree 参照(`BROKER_WORKTREES_DIR`)は起動時の env
+   固定 — 多重度1・手動で、過去のすべての publish はオペレーターが `up`
+   前に正しいチケットへ向けていたことに黙って依存していた。リクエスト搭載
+   ticket ルーティング + オペレーター登録制チケットレジストリとして修正
+   (docs/broker-ticket-routing.md — 設計レビュー SHIP-WITH-FIXES 全11件
+   反映; R2 `dedaffd`、R3 `b621372`)。R4 実走: RT-1(phase2-demo#5)と
+   RT-2(phase3-docs#2)を再作成なしで**同一 broker** から publish;
+   負の socket プローブ5種; F6 レグ — ゲートが開いている間に RT-1 を
+   登録解除すると、**正しい** sha の承認でも fail-closed("no longer
+   registered; aborting"、何も push されない)。フォローアップとして記録
+   (ブロッカーではない): workerd はスタック単一・シングルフライトで並行
+   チケットが競合し(`workerd busy`)、busy **拒否**が worker-run 予算を
+   消費する(RT-2 はリトライで 3/12 を空費); `run_tests` は `npm test`
+   前提のため package.json の無い docs リポジトリはゲートを通れない
+   (RT-2 は no-op のテストスクリプトをコミットして回避; per-repo
+   TEST_COMMAND は将来課題)。
 
 M1 の初回 boot 摩擦(すべて live で発見、静的検査ではゼロ):
 - `:ro` の harness bind に重ねた named volume は**ホスト側** node_modules(darwin

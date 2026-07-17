@@ -2,8 +2,14 @@
 # Host-owned broker ticket registry. common.sh must be sourced first.
 
 broker_ticket_registry_dir() {
-  local registry_dir
-  registry_dir="$(canonicalize_path "$(state_root)/broker-tickets")" || return $?
+  # Two guarded steps, NOT one nested substitution: `canonicalize_path
+  # "$(state_root)/broker-tickets"` only propagates the OUTER command's
+  # status — a dying state_root would silently yield the literal argument
+  # "/broker-tickets" (filesystem root), which canonicalizes fine and passes
+  # reject_tasks_path.
+  local sr registry_dir
+  sr="$(state_root)" || return $?
+  registry_dir="$(canonicalize_path "$sr/broker-tickets")" || return $?
   reject_tasks_path "$registry_dir"
   printf '%s' "$registry_dir"
 }

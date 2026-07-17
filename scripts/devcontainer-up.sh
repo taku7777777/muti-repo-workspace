@@ -21,7 +21,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$SCRIPT_DIR/lib/common.sh"
 
-export COMPOSE_PROJECT_NAME="$(compose_project_name)"
+COMPOSE_PROJECT_NAME="$(compose_project_name)" || die "cannot resolve the compose project name (broken workspace config?)"
+export COMPOSE_PROJECT_NAME
 
 KEYCHAIN_SERVICE="claude-code-oauth-token"
 

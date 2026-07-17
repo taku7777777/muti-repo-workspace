@@ -243,7 +243,7 @@ Subcommands:
                                         scripts/lib/ticket-sources/<ticket_source>.sh;
                                         --body-file reads it from a local file
                                         instead. Unless --no-triage, a fetched
-                                        body is auto-triaged (bounded, read-only
+                                        body is auto-triaged (bounded, tool-less
                                         Claude classifier) to pre-fill --title/
                                         --repos; explicit flags always win.
   list [args...]                       exec scripts/list-task.sh
@@ -1080,4 +1080,16 @@ function main() {
   }
 }
 
-if (path.resolve(process.argv[1] || "") === fileURLToPath(import.meta.url)) main();
+// realpathSync, not path.resolve: Node resolves the MAIN MODULE's symlinks
+// for import.meta.url, but argv[1] keeps the symlink path — so a symlinked
+// install (npm link's bin shim, or a hand-made PATH symlink) would compare
+// unequal and mrw would exit 0 having done NOTHING (found live: a stale
+// /opt/homebrew/bin/mrw no-op'ing three `mrw close` runs).
+function isMainModule() {
+  try {
+    return fs.realpathSync(process.argv[1] || "") === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+}
+if (isMainModule()) main();

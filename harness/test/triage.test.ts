@@ -108,6 +108,6 @@ test("triage host-side posture is tool-less and uses an inert cwd", () => {
   }
   assert.deepEqual(
     new Set(TRIAGE_DENY_ALL_BUILTINS),
-    new Set(["Edit", "Write", "Bash", "NotebookEdit", "WebFetch", "WebSearch", "Read", "Grep", "Glob"]),
+    new Set(["Edit", "Write", "Bash", "NotebookEdit", "WebFetch", "WebSearch", "Read", "Grep", "Glob", "Task"]),
   );
 });

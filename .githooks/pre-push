@@ -25,10 +25,25 @@ WORKSPACE_ROOT="$(dirname "$HOOK_DIR")"
 # NOTE: the broker independently enforces allowed_push_orgs in-process from
 # broker-policy.json (the authoritative gate on the container path); this
 # hook is defence-in-depth for the native (non-containerized) push path.
-_spoof_local="$(git config --local --get mrw.configDir 2>/dev/null || true)"
-_spoof_worktree="$(git config --worktree --get mrw.configDir 2>/dev/null || true)"
+# --includes on both probes: scoped reads default includes OFF, so a plain
+# `--local --get` would MISS an [include] path=<worker-file> indirection while
+# the trusted plain `git config --get` below EXPANDS it (local wins over the
+# baked global include) — the tamper scan must see exactly what the trusted
+# read will see (live-verified bypass; mirrors broker/src/git.ts's
+# DANGEROUS_CONFIG denylist of include.path/includeif.*).
+_spoof_local="$(git config --local --includes --get mrw.configDir 2>/dev/null || true)"
+_spoof_worktree="$(git config --worktree --includes --get mrw.configDir 2>/dev/null || true)"
 if [ -n "$_spoof_local" ] || [ -n "$_spoof_worktree" ]; then
   echo "pre-push: BLOCKED: mrw.configDir found in repo-local/worktree git config (tampering — this key must only come from the setup-baked include file)." >&2
+  exit 1
+fi
+# And reject include indirection in worker-writable scopes outright, even when
+# it does not (yet) set mrw.configDir — same posture as the broker's
+# untrusted-config scan.
+_spoof_includes="$(git config --local --get-regexp '^include(if\..*)?\.path$' 2>/dev/null || true)"
+_spoof_includes_wt="$(git config --worktree --get-regexp '^include(if\..*)?\.path$' 2>/dev/null || true)"
+if [ -n "$_spoof_includes" ] || [ -n "$_spoof_includes_wt" ]; then
+  echo "pre-push: BLOCKED: include.path/includeIf found in repo-local/worktree git config (worker-writable include indirection is not trusted)." >&2
   exit 1
 fi
 

@@ -1,9 +1,9 @@
 # `mrw` 化 計画・実行状況・実現方法
 
 > 作業ブランチ: **`feat/mrw`**（PR #13 で a8d972b までは master マージ済み。
-> それ以降 = env-sanitize / pre-merge blockers / broker ticket routing が未マージ分）
+> それ以降 = env-sanitize / pre-merge blockers / broker ticket routing は **PR #14 で master へ合流済み**）
 > 設計の正典: [docs/mrw-cli.md](docs/mrw-cli.md)（+ [.ja.md](docs/mrw-cli.ja.md)）
-> 最終更新: 2026-07-17
+> 最終更新: 2026-08-02（§6 の記録索引を追加・合流状況を更新。§0〜5 の内容は 2026-07-17 時点）
 
 ## 0. 概要（何を目指すか）
 
@@ -205,3 +205,18 @@ mrw task-up <link>      # タスク開始（ディレクトリ生成 + cmux + LL
 - `allowed_push_orgs`/`_hosts` は broker が in-process で強制（authoritative）+
   pre-push フックが defence-in-depth。
 - 生成ファイルは手編集せずテンプレ + スクリプトで再生成。
+
+## 6. 記録（`docs/records/`）
+
+当時のまま凍結した時点の記録。上書きせず、方針が変わったときは注記で足す
+（成果物管理ポリシー §2.1 / §6 — `AGENTS.md`）。
+
+- **出典**: [rebuild-doc/](docs/records/rebuild-doc/README.md) — 2026-07-16 時点の `feat/mrw` を
+  到達目標に、コードを参照できない独立エージェントがゼロから再構築するための要求・技術仕様パック
+  （01〜10 + README）。既知欠陥は `09-known-issues.md`
+- **レビュー入力**: [rebuild-doc-fb/](docs/records/rebuild-doc-fb/README.md) — 上記パックへの
+  レビュー指摘（Blocker〜Low の重大度付き・01〜07 + README）
+- **レビュー入力**: [review-fb-20260716.md](docs/records/review-fb-20260716.md)（実施日 2026-07-16。
+  MUST-FIX 3系統は §2 のとおり `440da38` で修正済み）/
+  [review-codexfb-20260716.md](docs/records/review-codexfb-20260716.md)（実施日 2026-07-17）/
+  [review-feedback.md](docs/records/review-feedback.md)（実施日 2026-07-05・第2巡 2026-07-07）

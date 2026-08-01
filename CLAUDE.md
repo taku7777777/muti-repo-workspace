@@ -39,3 +39,5 @@ and `tasks/` is generated local state (never committed).
 - Worktree creation must be done with `git -C repositories/<repo> worktree add
   ../../tasks/<T>/repositories/<repo> ...` (relative target path, no command
   chaining) — see the open-task skill for the exact rules.
+
+@AGENTS.md

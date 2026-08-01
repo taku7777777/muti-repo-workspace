@@ -1,4 +1,5 @@
 # 05 — コンテナ経路(devcontainer)実装仕様
+日付: 2026-07-17(2026-08-02 の §12.1 移行で遡及付与。値はファイルの最終更新時刻 —— 初版コミットは保存と同日のため)
 
 > 対象: `.devcontainer/` + `docker/egress/` + `broker/` + `reviewer/` + `harness/`。
 > macOS サンドボックスを Linux コンテナ(netns 境界)に置換した経路。
